@@ -46,6 +46,8 @@
 
 #include "bot_worker/transport.h"
 
+#include "bot_worker/persona.h"
+
 #include <array>
 #include <atomic>
 #include <cerrno>
