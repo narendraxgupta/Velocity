@@ -337,12 +337,18 @@ struct MicrostructureValidator::Impl {
                                           : std::min(ev.display_quantity, plan.remainder),
                 ev.ts_ns, ev.tif, ev.expire_at_ns,
             };
-            auto& side_map = (ev.side == MicroSide::BUY) ? book.bids : book.asks;
-            // operator[] returns a reference; we push_back and stash the
-            // iterator. NB: std::list iterators are stable.
-            auto& lst = side_map[ev.price];
-            lst.push_back(r);
-            by_id[ev.id] = std::prev(lst.end());
+            // bids and asks have different comparator types (descending vs
+            // ascending), so a ?: over them has no common reference type;
+            // dispatch through a generic lambda instead.
+            auto rest_into = [&](auto& side_map) {
+                // operator[] returns a reference; we push_back and stash the
+                // iterator. NB: std::list iterators are stable.
+                auto& lst = side_map[ev.price];
+                lst.push_back(r);
+                by_id[ev.id] = std::prev(lst.end());
+            };
+            if (ev.side == MicroSide::BUY) rest_into(book.bids);
+            else                           rest_into(book.asks);
         }
     }
 

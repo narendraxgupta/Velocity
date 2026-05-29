@@ -39,8 +39,8 @@ target_link_libraries(velocity-bot-worker
         velocity::compile_options
         velocity::proto
         spdlog::spdlog
-        # liburing — io_uring wrapper (Linux only)
-        $<$<PLATFORM_ID:Linux>:uring>
+        # liburing — io_uring wrapper (Linux only) conal provides target
+        $<$<PLATFORM_ID:Linux>:liburing::liburing>
         # boost::lockfree::spsc_queue for SPSC publish queues
         Boost::headers
         # libcurl for the portable REST transport (multi-handle)

@@ -84,6 +84,12 @@ find_package(uwebsockets CONFIG)
 find_package(usockets    CONFIG)
 find_package(Drogon    CONFIG REQUIRED)
 
+# liburing — io_uring wrapper. Linux-only (the Conan recipe rejects other
+# OSes), so guard the lookup; the bot-worker link below is likewise guarded.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(liburing CONFIG REQUIRED)
+endif()
+
 # ---- Code generation from proto ---------------------------------------------
 include(VelocityProtoGen)
 velocity_add_proto_library(
