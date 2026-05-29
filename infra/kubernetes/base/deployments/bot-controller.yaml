@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bot-controller
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: bot-controller }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: bot-controller }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: bot-controller }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "9093"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: controller
+          image: velocity/bot-controller:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: grpc,    containerPort: 7101 }
+            - { name: metrics, containerPort: 9093 }
+          env:
+            - { name: VELOCITY_LISTEN_HOST,  value: "0.0.0.0" }
+            - { name: VELOCITY_GRPC_PORT,    value: "7101" }
+            - { name: VELOCITY_METRICS_PORT, value: "9093" }
+            - { name: VELOCITY_REDIS_ADDR,   value: "redis.velocity-data.svc.cluster.local:6379" }
+          readinessProbe:
+            grpc: { port: 7101 }
+            periodSeconds: 5
+          livenessProbe:
+            grpc: { port: 7101 }
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 500m, memory: 512Mi }
+            limits:   { cpu: 2,    memory: 2Gi  }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem:   true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: bot-controller, namespace: velocity-control }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: bot-controller }
+  ports:
+    - { name: grpc,    port: 7101, targetPort: grpc }
+    - { name: metrics, port: 9093, targetPort: metrics }

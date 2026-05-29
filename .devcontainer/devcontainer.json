@@ -1,0 +1,50 @@
+{
+	"name": "velocity",
+	"image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+
+	"features": {
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {
+			"moby": true,
+			"version": "latest"
+		},
+		"ghcr.io/devcontainers/features/node:1": { "version": "20" },
+		"ghcr.io/devcontainers/features/go:1": { "version": "1.22" },
+		"ghcr.io/devcontainers/features/python:1": { "version": "3.11" }
+	},
+
+	"hostRequirements": {
+		"cpus": 4,
+		"memory": "16gb",
+		"storage": "32gb"
+	},
+
+	"onCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends make jq curl ca-certificates",
+
+	"postCreateCommand": "cp -n frontend/.env.example frontend/.env.local 2>/dev/null || true; make bootstrap || echo 'bootstrap did not finish — run \"make bootstrap\" manually in the terminal'",
+
+	"forwardPorts": [3000, 8080, 8090, 9000, 9101, 3001, 9090, 8085, 16686],
+
+	"portsAttributes": {
+		"3000": { "label": "Frontend (leaderboard UI)", "onAutoForward": "notify" },
+		"8080": { "label": "API Gateway", "onAutoForward": "silent" },
+		"8090": { "label": "Leaderboard WebSocket", "onAutoForward": "silent" },
+		"9000": { "label": "QuestDB Console", "onAutoForward": "silent" },
+		"9101": { "label": "MinIO Console", "onAutoForward": "silent" },
+		"3001": { "label": "Grafana", "onAutoForward": "silent" },
+		"9090": { "label": "Prometheus", "onAutoForward": "silent" },
+		"8085": { "label": "Redpanda Console", "onAutoForward": "silent" },
+		"16686": { "label": "Jaeger (tracing)", "onAutoForward": "silent" }
+	},
+
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-azuretools.vscode-docker",
+				"golang.go",
+				"ms-python.python",
+				"dbaeumer.vscode-eslint",
+				"esbenp.prettier-vscode"
+			]
+		}
+	}
+}

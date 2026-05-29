@@ -1,0 +1,33 @@
+apiVersion: v2
+name: velocity
+description: |
+  Velocity — the benchmarking platform for low-latency trading systems.
+
+  This chart deploys the full Velocity stack: api-gateway, submission-engine,
+  bot-controller / worker, telemetry-ingester, correctness-validator,
+  scoring-service, leaderboard-ws, frontend, plus the data plane
+  (Redis, Redpanda, QuestDB, MinIO) and the auxiliary services
+  (chaos-orchestrator, pcap-recorder / replayer, marketdata-generator,
+  critique-service, anomaly-detector, audit-log, plugin-orchestrator).
+
+  The chart is the same set of objects in infra/kubernetes/base/ but
+  templated for values like image tags, replica counts, namespace
+  prefixes, and external dependencies (e.g. swap MinIO for an
+  S3-compatible endpoint).
+
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+keywords:
+  - velocity
+  - benchmark
+  - latency
+  - trading
+
+maintainers:
+  - name: Velocity Platform
+    email: devs@velocityhq.io
+
+sources:
+  - https://github.com/velocity-platform/velocity

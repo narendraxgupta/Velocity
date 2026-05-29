@@ -1,0 +1,92 @@
+// =============================================================================
+// Velocity — scoring.proto
+//
+// The composite-score record published by the leaderboard service. One record
+// per submission; the latest record wins. Frontends receive these via the
+// `leaderboard.updates` Redis Pub/Sub channel re-broadcast through the
+// WebSocket gateway.
+//
+// The scoring formula itself is documented in `docs/scoring.md`. This file
+// just defines the wire shape.
+// =============================================================================
+
+syntax = "proto3";
+
+package velocity.scoring.v1;
+
+import "common.proto";
+
+option go_package        = "github.com/velocity/platform/proto/gen/go/scoring/v1;scoringv1";
+option cc_enable_arenas  = true;
+option optimize_for      = SPEED;
+
+// ---------------------------------------------------------------------------
+// LeaderboardEntry — the canonical record displayed in the UI.
+// ---------------------------------------------------------------------------
+message LeaderboardEntry {
+  velocity.common.v1.SubmissionId submission_id = 1;
+  string display_name = 2;
+  string team_name    = 3;
+  uint32 rank         = 4;
+
+  // Composite [0,100]
+  double composite_score = 10;
+
+  // Sub-scores, all [0,100]
+  double throughput_score  = 20;
+  double latency_score     = 21;
+  double correctness_score = 22;
+
+  // Headline raw numbers (for the UI to display next to the score).
+  uint64 sustained_rps = 30;
+  uint64 p50_ns        = 31;
+  uint64 p99_ns        = 32;
+  double correctness_pct = 33;
+
+  // Movement vs previous snapshot.
+  RankDelta delta = 40;
+
+  // When this entry was last updated (for "live now" indicators).
+  fixed64 updated_at_ns = 50;
+
+  // Which benchmark produced this — for drilldown links.
+  string benchmark_id = 60;
+
+  // Submission lifecycle state (for badge rendering: live, killed, OOM...).
+  EntryStatus status = 70;
+}
+
+enum EntryStatus {
+  ENTRY_STATUS_UNSPECIFIED = 0;
+  ENTRY_STATUS_PENDING     = 1;  // Submitted, no run yet
+  ENTRY_STATUS_RUNNING     = 2;  // Bench in flight
+  ENTRY_STATUS_SCORED      = 3;  // Has a final score
+  ENTRY_STATUS_DISQUALIFIED = 4; // Crashed / OOM / health failed
+}
+
+message RankDelta {
+  // Positive = climbed (rank number decreased). Use a sint32 so JSON encoding
+  // is human-readable.
+  sint32 positions = 1;
+  // Whether the entry is brand new.
+  bool first_appearance = 2;
+}
+
+// ---------------------------------------------------------------------------
+// LeaderboardSnapshot — a full ordered list of entries. Used on initial
+// connect; subsequent updates ship deltas.
+// ---------------------------------------------------------------------------
+message LeaderboardSnapshot {
+  fixed64 snapshot_ts_ns = 1;
+  repeated LeaderboardEntry entries = 2;
+}
+
+// ---------------------------------------------------------------------------
+// LeaderboardDelta — incremental updates published on every score change.
+// Frontends apply these to their local snapshot.
+// ---------------------------------------------------------------------------
+message LeaderboardDelta {
+  fixed64 ts_ns = 1;
+  repeated LeaderboardEntry upserts = 2;
+  repeated velocity.common.v1.SubmissionId removed = 3;
+}

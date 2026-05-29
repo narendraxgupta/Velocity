@@ -1,0 +1,351 @@
+# =============================================================================
+# Velocity — Application Services (composed on top of docker-compose.yml)
+#
+# These are *our* services, built from source via the per-service Dockerfile.
+# Gated by the `apps` profile so the infrastructure stack can come up
+# independently for backend-only work.
+# =============================================================================
+
+services:
+  api-gateway:
+    image: velocity/api-gateway:dev
+    build:
+      context: ..
+      dockerfile: services/api-gateway/Dockerfile
+      target: runtime
+    container_name: velocity-api-gateway
+    profiles: [apps]
+    networks: [apps, data]
+    ports:
+      - "8080:8080"
+    environment:
+      VELOCITY_HTTP_PORT: 8080
+      VELOCITY_REDPANDA_BROKERS: redpanda:29092
+      VELOCITY_REDIS_ADDR: redis:6379
+      VELOCITY_SUBMISSION_ENGINE_GRPC: submission-engine:7001
+      VELOCITY_BOT_CONTROLLER_GRPC: bot-controller:7002
+      VELOCITY_MINIO_ENDPOINT: minio:9000
+      VELOCITY_MINIO_ACCESS_KEY: velocity
+      VELOCITY_MINIO_SECRET_KEY: velocity-dev-secret
+      VELOCITY_OTLP_ENDPOINT: http://jaeger:4318
+      VELOCITY_LOG_LEVEL: info
+    depends_on:
+      redpanda:          { condition: service_healthy }
+      redis:             { condition: service_healthy }
+      minio:             { condition: service_healthy }
+      submission-engine: { condition: service_started }
+      bot-controller:    { condition: service_started }
+
+  submission-engine:
+    image: velocity/submission-engine:dev
+    build:
+      context: ..
+      dockerfile: services/submission-engine/Dockerfile
+      target: runtime
+    container_name: velocity-submission-engine
+    profiles: [apps]
+    networks: [apps, data]
+    ports:
+      - "7001:7001"
+    environment:
+      VELOCITY_GRPC_PORT: 7001
+      VELOCITY_DOCKER_HOST: unix:///var/run/docker.sock
+      VELOCITY_REGISTRY_HOST: registry:5000
+      VELOCITY_MINIO_ENDPOINT: minio:9000
+      VELOCITY_MINIO_ACCESS_KEY: velocity
+      VELOCITY_MINIO_SECRET_KEY: velocity-dev-secret
+      VELOCITY_REDIS_ADDR: redis:6379
+      VELOCITY_OTLP_ENDPOINT: jaeger:4317
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      minio:    { condition: service_healthy }
+      registry: { condition: service_started }
+
+  bot-controller:
+    image: velocity/bot-controller:dev
+    build:
+      context: ..
+      dockerfile: services/bot-fleet/controller/Dockerfile
+      target: runtime
+    container_name: velocity-bot-controller
+    profiles: [apps]
+    networks: [apps, data]
+    ports:
+      - "7002:7002"
+    environment:
+      VELOCITY_GRPC_PORT: 7002
+      VELOCITY_REDPANDA_BROKERS: redpanda:29092
+      VELOCITY_REDIS_ADDR: tcp://redis:6379
+      VELOCITY_OTLP_ENDPOINT: http://jaeger:4318
+    depends_on:
+      redpanda: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+
+  bot-worker:
+    image: velocity/bot-worker:dev
+    build:
+      context: ..
+      dockerfile: services/bot-fleet/worker/Dockerfile
+      target: runtime
+    profiles: [apps]
+    networks: [apps, data]
+    # Workers are horizontally scaled with `docker compose up --scale bot-worker=4`
+    deploy:
+      replicas: 1
+    environment:
+      VELOCITY_CONTROLLER_GRPC: bot-controller:7002
+      VELOCITY_REDPANDA_BROKERS: redpanda:29092
+      VELOCITY_WORKER_ID_PREFIX: bw
+      VELOCITY_OTLP_ENDPOINT: http://jaeger:4318
+    depends_on:
+      bot-controller: { condition: service_started }
+      redpanda:       { condition: service_healthy }
+    # NOTE: io_uring needs `unconfined` seccomp in some environments; this is
+    # safe in our dev compose stack, NOT in production.
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      memlock: -1   # required for io_uring buffer registration
+      nofile:
+        soft: 1048576
+        hard: 1048576
+
+  telemetry-ingester:
+    image: velocity/telemetry-ingester:dev
+    build:
+      context: ..
+      dockerfile: services/telemetry-ingester/Dockerfile
+      target: runtime
+    container_name: velocity-telemetry-ingester
+    profiles: [apps]
+    networks: [apps, data]
+    environment:
+      VELOCITY_REDPANDA_BROKERS: redpanda:29092
+      VELOCITY_QUESTDB_HOST: questdb
+      VELOCITY_QUESTDB_ILP_PORT: 9009
+      VELOCITY_REDIS_ADDR: redis:6379
+      VELOCITY_OTLP_ENDPOINT: jaeger:4317
+    depends_on:
+      redpanda: { condition: service_healthy }
+      questdb:  { condition: service_healthy }
+      redis:    { condition: service_healthy }
+
+  correctness-validator:
+    image: velocity/correctness-validator:dev
+    build:
+      context: ..
+      dockerfile: services/correctness-validator/Dockerfile
+      target: runtime
+    container_name: velocity-correctness-validator
+    profiles: [apps]
+    networks: [apps, data]
+    environment:
+      VELOCITY_REDPANDA_BROKERS: redpanda:29092
+      VELOCITY_QUESTDB_HOST: questdb
+      VELOCITY_QUESTDB_ILP_PORT: 9009
+      VELOCITY_OTLP_ENDPOINT: jaeger:4317
+    depends_on:
+      redpanda: { condition: service_healthy }
+      questdb:  { condition: service_healthy }
+
+  scoring-service:
+    image: velocity/scoring-service:dev
+    build:
+      context: ..
+      dockerfile: services/scoring-service/Dockerfile
+      target: runtime
+    container_name: velocity-scoring-service
+    profiles: [apps]
+    networks: [apps, data]
+    environment:
+      VELOCITY_KAFKA_BROKERS: redpanda:29092
+      VELOCITY_REDIS_ADDR: tcp://redis:6379
+      VELOCITY_LATENCY_TOPIC: metrics.latency.1s
+      VELOCITY_CORRECTNESS_TOPIC: telemetry.fills
+      VELOCITY_LEADERBOARD_CHANNEL: leaderboard.global
+      VELOCITY_LEADERBOARD_ZSET: leaderboard:composite
+      VELOCITY_GROUP_ID: velocity-scoring
+      VELOCITY_OTLP_ENDPOINT: jaeger:4317
+    depends_on:
+      redpanda: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+
+  leaderboard-ws:
+    image: velocity/leaderboard-ws:dev
+    build:
+      context: ..
+      dockerfile: services/leaderboard-ws/Dockerfile
+      target: runtime
+    container_name: velocity-leaderboard-ws
+    profiles: [apps]
+    networks: [apps, data]
+    ports:
+      - "8090:8090"
+    environment:
+      VELOCITY_WS_PORT: 8090
+      VELOCITY_REDIS_ADDR: redis:6379
+      VELOCITY_OTLP_ENDPOINT: jaeger:4317
+    depends_on:
+      redis: { condition: service_healthy }
+
+  # ---------------------------------------------------------------------------
+  #  ollama — local LLM runtime used by the critique-service.
+  #
+  #  This stays in the `apps` profile so the heavyweight model only loads
+  #  when we explicitly bring up application services. The first run
+  #  downloads the model on demand (handled by `ollama-init` below).
+  #  In production we run Ollama on a GPU node; locally CPU inference is
+  #  slow but workable for the demo prompt sizes.
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:0.4.4
+    container_name: velocity-ollama
+    profiles: [apps, llm]
+    networks: [apps]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "5m"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  #  ollama-init — pull the configured model once on first start. Idempotent.
+  # ---------------------------------------------------------------------------
+  ollama-init:
+    image: ollama/ollama:0.4.4
+    container_name: velocity-ollama-init
+    profiles: [apps, llm]
+    networks: [apps]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        until ollama list > /dev/null 2>&1; do
+          echo "waiting for ollama..."; sleep 2
+        done
+        ollama pull qwen2.5-coder:7b || ollama pull qwen2.5:7b
+        echo "model warm"
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    depends_on:
+      ollama: { condition: service_healthy }
+
+  critique-service:
+    image: velocity/critique-service:dev
+    build:
+      context: ../services/critique-service
+      dockerfile: Dockerfile
+    container_name: velocity-critique-service
+    profiles: [apps, llm]
+    networks: [apps, data]
+    ports:
+      - "8094:8094"
+    environment:
+      CRITIQUE_HTTP_ADDR: ":8094"
+      CRITIQUE_REDIS_ADDR: redis:6379
+      CRITIQUE_OLLAMA_URL: http://ollama:11434
+      CRITIQUE_OLLAMA_MODEL: qwen2.5-coder:7b
+      CRITIQUE_MAX_INFLIGHT: "2"
+    depends_on:
+      redis:  { condition: service_healthy }
+      ollama: { condition: service_healthy }
+
+  anomaly-detector:
+    image: velocity/anomaly-detector:dev
+    build:
+      context: ../services/anomaly-detector
+      dockerfile: Dockerfile
+    container_name: velocity-anomaly-detector
+    profiles: [apps]
+    networks: [apps, data]
+    ports:
+      - "8095:8095"
+    environment:
+      ANOMALY_REDIS_ADDR: redis://redis:6379/0
+      ANOMALY_WINDOW_SIZE: "256"
+      ANOMALY_REFIT_EVERY: "8"
+      ANOMALY_CONTAM: "0.05"
+      LOG_LEVEL: INFO
+    depends_on:
+      redis: { condition: service_healthy }
+
+  marketdata-generator:
+    image: velocity/marketdata-generator:dev
+    build:
+      context: ../services/marketdata-generator
+      dockerfile: Dockerfile
+    container_name: velocity-marketdata-generator
+    profiles: [apps]
+    networks: [apps, data]
+    ports:
+      - "8093:8093"
+    environment:
+      MARKETDATA_TICK_MS: "10"
+      MARKETDATA_REDIS_ADDR: redis:6379
+      MARKETDATA_KAFKA_BROKERS: redpanda:29092
+      MARKETDATA_KAFKA_TOPIC: marketdata.ticks
+      MARKETDATA_HTTP_ADDR: ":8093"
+      MARKETDATA_SEED: "0"
+    depends_on:
+      redis:    { condition: service_healthy }
+      redpanda: { condition: service_healthy }
+
+  # ---------------------------------------------------------------------------
+  #  audit-log — drains gateway/service audit events into QuestDB.
+  #
+  #  Reads from BOTH the Redis Stream (gateway path, no Kafka in C++)
+  #  and the per-tenant Kafka topics (Go-service path). Writes ILP into
+  #  QuestDB. Hash-chains rows so tampering is detectable offline.
+  # ---------------------------------------------------------------------------
+  audit-log:
+    image: velocity/audit-log:dev
+    build:
+      context: ../services/audit-log
+      dockerfile: Dockerfile
+    container_name: velocity-audit-log
+    profiles: [apps]
+    networks: [apps, data]
+    ports:
+      - "8081:8081"
+    environment:
+      REDIS_ADDR:      redis:6379
+      QUESTDB_HOST:    questdb
+      QUESTDB_ILP_PORT: "9009"
+      KAFKA_BROKERS:   redpanda:29092
+      KAFKA_GROUP:     audit-log
+      HTTP_PORT:       "8081"
+    depends_on:
+      redis:    { condition: service_healthy }
+      questdb:  { condition: service_healthy }
+      redpanda: { condition: service_healthy }
+
+  frontend:
+    image: velocity/frontend:dev
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: velocity-frontend
+    profiles: [apps]
+    networks: [apps]
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_GATEWAY_URL: http://localhost:8080
+      # NB: variable name must match what `use-leaderboard-stream.ts`
+      # reads (NEXT_PUBLIC_LEADERBOARD_WS, no `_URL` suffix). Path must
+      # match the route registered in leaderboard-ws/src/server.cpp.
+      NEXT_PUBLIC_LEADERBOARD_WS: ws://localhost:8090/v1/leaderboard
+    depends_on:
+      - api-gateway
+      - leaderboard-ws

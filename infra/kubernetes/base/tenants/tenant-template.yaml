@@ -1,0 +1,122 @@
+# =============================================================================
+#  Velocity — Tenant template
+#
+#  Each tenant gets:
+#    - One namespace `velocity-tenant-<id>` for their sandbox + jobs.
+#    - A ResourceQuota cap on CPU, memory, ephemeral storage and pod count
+#      so a single tenant can't starve the cluster.
+#    - A LimitRange so individual pods that forget to set requests still
+#      slot into a predictable bucket.
+#    - A NetworkPolicy denying everything by default; the platform-wide
+#      networkpolicy-sandbox.yaml then re-enables the egress lanes
+#      sandbox pods need.
+#
+#  Usage:
+#    sed -e 's/__TID__/acme/g' tenant-template.yaml | kubectl apply -f -
+#
+#  Or via the dedicated CLI helper:
+#    scripts/tenant.sh create acme --cpu 16 --mem 32Gi --pods 64
+#
+#  Operator note: this file is a TEMPLATE — sed substitution targets are
+#  `__TID__` (tenant id, must match `[a-z][a-z0-9-]{1,30}[a-z0-9]`),
+#  `__CPU__`, `__MEM__`, `__PODS__`. See scripts/tenant.sh for the
+#  validated wrapper.
+# =============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velocity-tenant-__TID__
+  labels:
+    app.kubernetes.io/part-of: velocity
+    velocity.tier: tenant
+    velocity.tenant: __TID__
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit:    restricted
+    pod-security.kubernetes.io/warn:     restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tenant-quota
+  namespace: velocity-tenant-__TID__
+spec:
+  hard:
+    requests.cpu:               "__CPU__"
+    requests.memory:            "__MEM__"
+    requests.ephemeral-storage: "20Gi"
+    limits.cpu:                 "__CPU__"
+    limits.memory:              "__MEM__"
+    pods:                       "__PODS__"
+    persistentvolumeclaims:     "4"
+    services:                   "8"
+    secrets:                    "16"
+    configmaps:                 "16"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: tenant-defaults
+  namespace: velocity-tenant-__TID__
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu:    "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu:    "100m"
+        memory: "128Mi"
+      max:
+        cpu:    "8"
+        memory: "16Gi"
+---
+# Default-deny ingress + egress. The shared
+# networkpolicy-sandbox.yaml then re-opens specific lanes
+# (Redpanda, Redis, telemetry-ingester) using podSelector match.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: velocity-tenant-__TID__
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Allow tenant pods to reach the shared data plane in
+# velocity-data. Cross-tenant traffic stays blocked because we
+# match only the velocity-data namespace, not other tenants.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-data-plane
+  namespace: velocity-tenant-__TID__
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              velocity.tier: data-plane
+      ports:
+        - protocol: TCP
+          port: 6379   # redis
+        - protocol: TCP
+          port: 9092   # redpanda
+        - protocol: TCP
+          port: 9000   # minio
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              velocity.tier: control
+      ports:
+        - protocol: TCP
+          port: 8080   # api-gateway
+        - protocol: TCP
+          port: 50051  # submission-engine grpc
+        - protocol: TCP
+          port: 50052  # bot-controller grpc

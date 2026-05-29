@@ -1,0 +1,112 @@
+# =============================================================================
+#  velocity-bot-worker — horizontally scaled load generators.
+#
+#  Production runs these on a dedicated node pool with c5.4xlarge instances
+#  (16 vCPU, 32 GiB) pinned via tolerations + nodeSelector. Each pod runs
+#  one process with `reactor_threads` matched to the cpu request.
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bot-worker
+  namespace: velocity-load
+  labels: { app.kubernetes.io/name: bot-worker }
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 25%, maxUnavailable: 0 }
+  selector:
+    matchLabels: { app.kubernetes.io/name: bot-worker }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: bot-worker }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "9094"
+    spec:
+      automountServiceAccountToken: false
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: { app.kubernetes.io/name: bot-worker }
+      # When a dedicated `load-gen` node group is provisioned (see
+      # infra/terraform/node-groups.tf) re-enable the selector + matching
+      # toleration below. Without that pool we let workers land on the
+      # `system` pool — they're trusted infra, not the gVisor sandbox.
+      # nodeSelector: { node.velocity.io/role: load-gen }
+      # tolerations:
+      #   - { key: node.velocity.io/role, operator: Equal, value: load-gen, effect: NoSchedule }
+      # The eBPF kernel-latency probe needs CAP_BPF + CAP_PERFMON (≥ 5.8).
+      # That's incompatible with `runAsNonRoot: true`, which is fine for
+      # bot-workers since they're trusted infra (not user code) and the
+      # capability set is the minimum required to load BPF programs.
+      # When eBPF is disabled at build time (VELOCITY_ENABLE_EBPF=OFF) the
+      # probe noops and the pod still functions correctly — capabilities
+      # remain unused but cost nothing.
+      securityContext:
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: velocity/bot-worker:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: metrics, containerPort: 9094 }
+          env:
+            - { name: VELOCITY_WORKER_ID,           valueFrom: { fieldRef: { fieldPath: metadata.name } } }
+            - { name: VELOCITY_CONTROLLER_GRPC,     value: "bot-controller.velocity-control.svc.cluster.local:7101" }
+            - { name: VELOCITY_REDPANDA_BROKERS,    value: "redpanda.velocity-data.svc.cluster.local:9092" }
+            - { name: VELOCITY_TELEMETRY_TOPIC,     value: "telemetry.raw" }
+            - { name: VELOCITY_REACTOR_THREADS,     value: "8" }
+            - { name: VELOCITY_METRICS_PORT,        value: "9094" }
+          readinessProbe:
+            tcpSocket: { port: metrics }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: metrics }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 4,  memory: 4Gi  }
+            limits:   { cpu: 8,  memory: 8Gi  }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem:   true
+            # Drop everything except the BPF + PERFMON pair. Pre-5.8 kernels
+            # would need SYS_ADMIN instead; for the supported floor of
+            # Linux ≥ 5.8 (matches the rest of the platform's CO-RE BPF
+            # objects) the narrow capability set is the right grant.
+            capabilities:
+              drop: ["ALL"]
+              add:  ["BPF", "PERFMON"]
+---
+# HPA — scale on outbound RPS exported as a custom Prometheus metric.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: bot-worker, namespace: velocity-load }
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: bot-worker
+  minReplicas: 2
+  maxReplicas: 32
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+    - type: Pods
+      pods:
+        metric: { name: velocity_orders_sent_per_second }
+        target: { type: AverageValue, averageValue: "50k" }
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies: [{ type: Percent, value: 100, periodSeconds: 30 }]
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies: [{ type: Pods,    value: 1,   periodSeconds: 60 }]

@@ -1,0 +1,127 @@
+// =============================================================================
+// Velocity — common.proto
+//
+// Shared scalar types used across every other .proto in this directory.
+//
+// Versioning: this file is `v1`. When a breaking change is needed, copy this
+// file to `common_v2.proto` and migrate consumers; never edit `v1` enums in
+// place.
+// =============================================================================
+
+syntax = "proto3";
+
+package velocity.common.v1;
+
+option go_package        = "github.com/velocity/platform/proto/gen/go/common/v1;commonv1";
+option cc_enable_arenas  = true;
+option optimize_for      = SPEED;
+
+// ---------------------------------------------------------------------------
+// Side of an order.
+//
+// `SIDE_UNSPECIFIED` is intentionally the zero value so that deserialization
+// of a malformed message produces a clearly invalid order rather than a
+// silent default (e.g. accidental BUY).
+// ---------------------------------------------------------------------------
+enum Side {
+  SIDE_UNSPECIFIED = 0;
+  SIDE_BUY         = 1;
+  SIDE_SELL        = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Order type. Mirrors the FIX 4.4 `OrdType` field (tag 40) for the values we
+// support.
+// ---------------------------------------------------------------------------
+enum OrderType {
+  ORDER_TYPE_UNSPECIFIED = 0;
+  ORDER_TYPE_LIMIT       = 1;   // Default for market makers
+  ORDER_TYPE_MARKET      = 2;   // Default for aggressive takers
+  ORDER_TYPE_IOC         = 3;   // Immediate-or-cancel (test takers under load)
+  ORDER_TYPE_FOK         = 4;   // Fill-or-kill (test atomicity)
+}
+
+// ---------------------------------------------------------------------------
+// Bot persona — the trading strategy a worker thread is simulating.
+//
+// These map 1:1 to the `bot-fleet/worker` strategy classes.
+// ---------------------------------------------------------------------------
+enum BotPersona {
+  BOT_PERSONA_UNSPECIFIED   = 0;
+  BOT_PERSONA_MARKET_MAKER  = 1;   // Posts symmetric bid/ask quotes
+  BOT_PERSONA_AGGRESSIVE    = 2;   // Crosses the spread with market/IOC orders
+  BOT_PERSONA_CANCELLER     = 3;   // Posts then cancels — exercises cancel path
+  BOT_PERSONA_SPOOFER       = 4;   // Burst-then-pull — exercises queue depth
+  BOT_PERSONA_NOISE         = 5;   // Random uniform — baseline traffic
+  // PPO-trained policy loaded as an ONNX graph by the worker. Falls
+  // back to MARKET_MAKER if the worker was built without ONNX Runtime
+  // or no model file is configured (see tools/rl-bot for training).
+  BOT_PERSONA_ADAPTIVE      = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Wire protocol the bot uses to talk to the submission's exchange.
+// ---------------------------------------------------------------------------
+enum WireProtocol {
+  WIRE_PROTOCOL_UNSPECIFIED = 0;
+  WIRE_PROTOCOL_REST        = 1;
+  WIRE_PROTOCOL_WEBSOCKET   = 2;
+  WIRE_PROTOCOL_FIX_44      = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Fixed-point monetary value.
+//
+// We never use IEEE-754 doubles for prices/quantities. `units` is the integer
+// representation; `scale` is the number of decimal places. Price 12.3450 is
+// {units: 1234500, scale: 4}.
+//
+// This avoids the entire family of bugs where `0.1 + 0.2 != 0.3` matters.
+// ---------------------------------------------------------------------------
+message Money {
+  sint64 units = 1;
+  uint32 scale = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Nanosecond timestamp.
+//
+// 8 bytes on the wire (fixed64) vs 9+ for google.protobuf.Timestamp. We
+// publish millions of these per second; the savings compound.
+// ---------------------------------------------------------------------------
+message NanoTime {
+  fixed64 nanos_unix = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Universally unique correlation id.
+//
+// 128 bits, generated client-side with a (high = wallclock_ms, low = random64)
+// scheme. Sortable by time within ~1 ms, globally unique with cosmic
+// probability.
+// ---------------------------------------------------------------------------
+message CorrelationId {
+  fixed64 high = 1;
+  fixed64 low  = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Network endpoint — host:port pair, used by the controller to tell workers
+// where to find the submission container.
+// ---------------------------------------------------------------------------
+message Endpoint {
+  string host   = 1;
+  uint32 port   = 2;
+  WireProtocol protocol = 3;
+  // Optional path for REST/WebSocket (e.g. "/api/v1/orders").
+  string path   = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Submission identifier — assigned at upload time, used as the partition key
+// for telemetry topics so that all events for one submission land on one
+// Redpanda partition.
+// ---------------------------------------------------------------------------
+message SubmissionId {
+  string value = 1;  // ULID — sortable, URL-safe
+}

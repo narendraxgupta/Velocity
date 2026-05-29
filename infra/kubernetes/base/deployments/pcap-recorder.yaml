@@ -1,0 +1,106 @@
+# =============================================================================
+#  pcap-recorder — captures every benchmark's TCP byte stream to MinIO.
+#
+#  Runs in velocity-control with a narrow RBAC: it needs to attach
+#  EphemeralContainers (the actual tcpdump runs there, with CAP_NET_RAW),
+#  exec into pods (to stream the pcap out), and read pods to discover
+#  targets. RBAC is bound at ClusterRole because EphemeralContainers
+#  patches can target any namespace listed in RECORDER_NAMESPACES.
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pcap-recorder
+  namespace: velocity-control
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pcap-recorder
+rules:
+  # Discover sandbox pods + read pod state for the reaper sweep.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # Attach the tcpdump ephemeral container.
+  - apiGroups: [""]
+    resources: ["pods/ephemeralcontainers"]
+    verbs: ["update", "patch"]
+  # Exec into ephemeral containers to stream the pcap out on Stop.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pcap-recorder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pcap-recorder
+subjects:
+  - kind: ServiceAccount
+    name: pcap-recorder
+    namespace: velocity-control
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pcap-recorder
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: pcap-recorder }
+spec:
+  replicas: 1
+  # Recreate so we never have two recorders fighting over the same
+  # benchmark_id → ephemeral-container patch.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: pcap-recorder }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: pcap-recorder }
+    spec:
+      serviceAccountName: pcap-recorder
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: recorder
+          image: velocity/pcap-recorder:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8091 }
+          env:
+            - { name: RECORDER_HTTP_ADDR,       value: "0.0.0.0:8091" }
+            - { name: RECORDER_NAMESPACES,      value: "velocity-sandbox,velocity-load" }
+            - { name: RECORDER_TCPDUMP_IMAGE,   value: "nicolaka/netshoot:latest" }
+            - { name: MINIO_ENDPOINT,           value: "minio.velocity-data.svc.cluster.local:9000" }
+            - { name: MINIO_BUCKET,             value: "velocity-artefacts" }
+            - name: MINIO_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: minio-creds, key: access-key } }
+            - name: MINIO_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: minio-creds, key: secret-key } }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pcap-recorder
+  namespace: velocity-control
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: pcap-recorder }
+  ports:
+    - { name: http, port: 8091, targetPort: http }

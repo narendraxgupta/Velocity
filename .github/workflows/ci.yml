@@ -1,0 +1,152 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-flight runs for the same PR/branch.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Use Conan v2 with a known-good cache key.
+  CONAN_USER_HOME: ${{ github.workspace }}/.conan2
+  CCACHE_DIR:      ${{ github.workspace }}/.ccache
+  CCACHE_COMPRESS: "1"
+  CCACHE_MAXSIZE:  "2G"
+
+jobs:
+  # ===========================================================================
+  # 1. Protobuf lint + breaking-change check.
+  # ===========================================================================
+  proto:
+    name: proto · buf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: bufbuild/buf-setup-action@v1
+        with: { github_token: ${{ secrets.GITHUB_TOKEN }} }
+      - name: buf lint
+        run: buf lint
+        working-directory: proto
+      - name: buf format check
+        run: buf format -d --exit-code
+        working-directory: proto
+      - name: buf breaking (against main)
+        if: github.event_name == 'pull_request'
+        run: buf breaking --against ".git#branch=origin/main,subdir=proto"
+        working-directory: proto
+
+  # ===========================================================================
+  # 2. C++ services — Conan + CMake build, run unit tests.
+  # ===========================================================================
+  cpp:
+    name: cpp · build + test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with: { key: cpp-${{ runner.os }} }
+
+      - name: System deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            python3-pip libssl-dev clang-tidy
+          pip3 install --upgrade "conan>=2.5,<3"
+
+      - name: Conan profile
+        run: |
+          conan profile detect --force
+          # Force C++20 ABI we use everywhere.
+          sed -i 's/compiler.cppstd=.*/compiler.cppstd=20/' ~/.conan2/profiles/default
+
+      - name: Conan install (deps)
+        run: conan install . --output-folder=build --build=missing -s build_type=Release
+
+      - name: CMake configure
+        run: |
+          cmake -S . -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \
+            -DVELOCITY_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure --parallel 4
+
+  # ===========================================================================
+  # 3. Go submission-engine — generate protos, build + test + vet.
+  # ===========================================================================
+  go:
+    name: go · submission-engine
+    runs-on: ubuntu-latest
+    needs: proto
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+      - uses: bufbuild/buf-setup-action@v1
+        with: { github_token: ${{ secrets.GITHUB_TOKEN }} }
+      - name: Generate proto stubs
+        run: buf generate
+        working-directory: proto
+      - name: Vet
+        working-directory: services/submission-engine
+        run: go vet ./...
+      - name: Test
+        working-directory: services/submission-engine
+        run: go test ./... -race -count=1
+
+  # ===========================================================================
+  # 4. Frontend — lint + typecheck + production build.
+  # ===========================================================================
+  frontend:
+    name: frontend · lint + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        # Project occasionally pulls peer-dependency conflicts (radix vs.
+        # next 14); legacy-peer-deps mirrors the dev setup.
+        run: npm ci --legacy-peer-deps
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+
+  # ===========================================================================
+  # 5. Terraform — fmt + validate (no apply).
+  # ===========================================================================
+  terraform:
+    name: terraform · fmt + validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.7.5 }
+      - run: terraform fmt -check -recursive
+      - name: terraform init (no backend)
+        run: terraform init -backend=false
+      - run: terraform validate -no-color

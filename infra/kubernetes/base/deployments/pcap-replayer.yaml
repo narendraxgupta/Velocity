@@ -1,0 +1,72 @@
+# =============================================================================
+#  pcap-replayer — deterministic byte-stream replay against a target engine.
+#
+#  Does NOT need K8s API access (it talks TCP to the target's Service), so
+#  no RBAC binding is required. The image runs as the standard non-root
+#  distroless user; capabilities all dropped.
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pcap-replayer
+  namespace: velocity-control
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pcap-replayer
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: pcap-replayer }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: pcap-replayer }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: pcap-replayer }
+    spec:
+      serviceAccountName: pcap-replayer
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: replayer
+          image: velocity/pcap-replayer:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8092 }
+          env:
+            - { name: REPLAYER_HTTP_ADDR,       value: "0.0.0.0:8092" }
+            - { name: MINIO_ENDPOINT,           value: "minio.velocity-data.svc.cluster.local:9000" }
+            - { name: MINIO_BUCKET,             value: "velocity-artefacts" }
+            - { name: REDIS_ADDR,               value: "redis.velocity-data.svc.cluster.local:6379" }
+            - name: MINIO_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: minio-creds, key: access-key } }
+            - name: MINIO_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: minio-creds, key: secret-key } }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            # Replay can be CPU-heavy when fan-out is large (one goroutine
+            # per captured flow plus a publisher). Give it real headroom.
+            limits:   { cpu: 2,    memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pcap-replayer
+  namespace: velocity-control
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: pcap-replayer }
+  ports:
+    - { name: http, port: 8092, targetPort: http }

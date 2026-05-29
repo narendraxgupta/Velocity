@@ -1,0 +1,76 @@
+# =============================================================================
+# Velocity — buf code generation
+#
+# Drives `buf generate`. Outputs go to proto/gen/{cpp,go,ts,py}/.
+# Invoked from the top-level Makefile via `make proto`.
+#
+# Each language target produces a ready-to-publish SDK. See the
+# README files under sdk/<lang>/ for the publish workflow; the GitHub
+# Actions release pipeline lives in .github/workflows/release-sdk.yml.
+# =============================================================================
+
+version: v2
+# clean MUST stay false. The Go consumers resolve the generated module via a
+# `replace … => ../../proto/gen/go` directive, which requires a committed
+# `proto/gen/go/go.mod` stub (force-added in .gitignore, copied early in
+# services/submission-engine/Dockerfile for layer caching). That stub lives
+# INSIDE buf's Go output dir, so `clean: true` deletes it on every
+# `buf generate` — breaking the submission-engine build (native AND container)
+# on the very next compile after `make bootstrap`/`make proto`. Leaving clean
+# off preserves the stub; the .pb.* outputs are gitignored regenerated files.
+clean: false
+managed:
+  enabled: true
+  # Do NOT manage go_package. Every .proto already declares the correct,
+  # versioned `option go_package` (…/gen/go/<area>/v1;<area>v1) — which is
+  # exactly what the Go consumers import. The previous `go_package_prefix`
+  # override collapsed every file onto the bare prefix because the schema
+  # lives in a flat directory (no per-package subdirs), so all files mapped
+  # to one import path with conflicting package names and protoc-gen-go
+  # failed with "inconsistent names commonv1 (common.proto) and botv1
+  # (bot.proto)". Letting the explicit per-file go_package win restores the
+  # subdirectory layout the consumers expect.
+  disable:
+    - file_option: go_package
+
+plugins:
+  # ---- C++ ----------------------------------------------------------------
+  - remote: buf.build/protocolbuffers/cpp
+    out:    gen/cpp
+  - remote: buf.build/grpc/cpp
+    out:    gen/cpp
+
+  # ---- Go -----------------------------------------------------------------
+  # The schema is a FLAT directory but each file's `option go_package` carries
+  # the full versioned import path (…/gen/go/<area>/v1). `paths=source_relative`
+  # would emit everything flat (gen/go/common.pb.go) which then can't satisfy
+  # `import …/gen/go/common/v1`. `module=<prefix>` strips the prefix from the
+  # declared go_package and lays each file out by the remainder, so common.proto
+  # lands at gen/go/common/v1/common.pb.go — exactly what consumers import.
+  - remote: buf.build/protocolbuffers/go
+    out:    gen/go
+    opt:    module=github.com/velocity/platform/proto/gen/go
+  - remote: buf.build/grpc/go
+    out:    gen/go
+    opt:
+      - module=github.com/velocity/platform/proto/gen/go
+      - require_unimplemented_servers=false
+
+  # ---- TypeScript (consumed by the Next.js frontend AND published) --------
+  - remote: buf.build/bufbuild/es:v2.2.0
+    out:    gen/ts
+    opt:
+      - target=ts
+      - import_extension=js
+
+  # ---- Python (published as `velocity-sdk` to GitHub Packages) ------------
+  #
+  # We use protocolbuffers/python for the message classes and grpc/python
+  # for the service stubs. Python type hints land in a sibling `pyi` file
+  # which makes the SDK ergonomic in IDEs.
+  - remote: buf.build/protocolbuffers/python
+    out:    gen/py
+  - remote: buf.build/protocolbuffers/pyi
+    out:    gen/py
+  - remote: buf.build/grpc/python
+    out:    gen/py

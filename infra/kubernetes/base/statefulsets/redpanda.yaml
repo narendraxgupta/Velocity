@@ -1,0 +1,66 @@
+# =============================================================================
+#  Redpanda — Kafka-API-compatible event broker.
+#  Single-node config; for production we'd swap to the Redpanda Operator
+#  with 3+ replicas and rack-aware scheduling. This base set is sufficient
+#  for the platform's regional deployment.
+# =============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda
+  namespace: velocity-data
+  labels: { app.kubernetes.io/name: redpanda }
+spec:
+  clusterIP: None
+  selector: { app.kubernetes.io/name: redpanda }
+  ports:
+    - { name: kafka, port: 9092 }
+    - { name: admin, port: 9644 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redpanda
+  namespace: velocity-data
+  labels: { app.kubernetes.io/name: redpanda }
+spec:
+  serviceName: redpanda
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: redpanda } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: redpanda } }
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: redpanda
+          image: redpandadata/redpanda:v24.2.7
+          args:
+            - redpanda
+            - start
+            - --smp=2
+            - --memory=2G
+            - --reserve-memory=128M
+            - --overprovisioned
+            - --node-id=0
+            - --check=false
+            - --kafka-addr=0.0.0.0:9092
+            - --advertise-kafka-addr=redpanda-0.redpanda.velocity-data.svc.cluster.local:9092
+            - --rpc-addr=0.0.0.0:33145
+            - --advertise-rpc-addr=redpanda-0.redpanda.velocity-data.svc.cluster.local:33145
+          ports:
+            - { name: kafka, containerPort: 9092 }
+            - { name: admin, containerPort: 9644 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/redpanda/data }
+          resources:
+            requests: { cpu: 1, memory: 2Gi }
+            limits:   { cpu: 4, memory: 4Gi }
+          readinessProbe:
+            tcpSocket: { port: kafka }
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 50Gi } }

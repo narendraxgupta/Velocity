@@ -1,0 +1,128 @@
+// =============================================================================
+//  velocity.plugin.v1 — plugin contracts for custom validators.
+//
+//  Velocity ships first-party microstructure validators in C++ (see
+//  correctness_validator/microstructure.cpp). Phase 4.5 opens the door
+//  for users to bring their own validators, packaged as gRPC sidecars
+//  alongside the core stack.
+//
+//  Architecture
+//  ------------
+//  - Submitter writes a small server implementing PluginValidator.
+//  - Submitter packages it as a Docker image and registers it in
+//    plugins/registry.yaml under their tenant.
+//  - The plugin-orchestrator service launches the sidecar inside the
+//    tenant's namespace and adds it to a service discovery list.
+//  - The correctness-validator fan-out hits each registered plugin
+//    with a stream of OrderEvent / FillEvent records.
+//  - Plugin returns Violation records; the validator merges them with
+//    its first-party output, scored as if they were native checks.
+//
+//  Wire stability: plugins pin a major version of this proto.
+//  PluginInfo.protocol_version returned at startup is matched against
+//  what the orchestrator was built for; a mismatch fails the sidecar
+//  with a clear log line rather than mid-stream weirdness.
+// =============================================================================
+
+syntax = "proto3";
+
+package velocity.plugin.v1;
+
+import "google/protobuf/empty.proto";
+import "telemetry.proto";
+
+option go_package = "github.com/velocity/platform/proto/gen/go/plugin/v1;pluginv1";
+
+// PluginInfo is returned by GetInfo at startup and on every reconnect.
+// The orchestrator caches it and gates traffic until protocol_version
+// matches what it expects.
+message PluginInfo {
+    // SemVer of the velocity.plugin.v1 contract the plugin implements.
+    string protocol_version = 1;
+    // Human-readable name shown in the UI's "validators applied" panel.
+    string display_name     = 2;
+    // Stable id for the plugin instance. Must be globally unique within
+    // a tenant. Convention: <vendor>/<plugin>/<version>.
+    string instance_id      = 3;
+    // Maximum batch size the plugin can absorb in a single Validate
+    // call. Orchestrator chunks fan-out at this boundary.
+    uint32 max_batch_size   = 4;
+    // Optional list of event kinds the plugin opts in to. Empty means
+    // "all event kinds". Reduces wire traffic for narrow checks.
+    repeated EventKind subscribed_event_kinds = 5;
+}
+
+enum EventKind {
+    EVENT_KIND_UNSPECIFIED = 0;
+    EVENT_KIND_ORDER       = 1;  // velocity.telemetry.v1.OrderEvent
+    EVENT_KIND_FILL        = 2;  // velocity.telemetry.v1.FillEvent
+    EVENT_KIND_CANCEL      = 3;
+    EVENT_KIND_AMEND       = 4;
+}
+
+// Violation is the plugin's verdict for a single event. The
+// correctness-validator records every violation; severity controls
+// whether the run is failed outright.
+message Violation {
+    string  event_id    = 1;
+    Severity severity   = 2;
+    // Short, machine-friendly code: "stp.self_trade", "post_only.cross".
+    // Convention: <plugin_short_name>.<rule_id>.
+    string  code        = 3;
+    // Human-friendly explanation. Renders in the UI under the
+    // submission's correctness tab.
+    string  message     = 4;
+    // Optional JSON object carrying offending field values, expected
+    // bounds, etc. The orchestrator passes this through verbatim.
+    string  detail_json = 5;
+    // Nanoseconds since Unix epoch the violation was raised.
+    int64   raised_at_ns = 6;
+}
+
+enum Severity {
+    SEVERITY_UNSPECIFIED = 0;
+    SEVERITY_INFO        = 1;  // logged, no score impact
+    SEVERITY_WARN        = 2;  // logged, soft score deduction
+    SEVERITY_ERROR       = 3;  // hard score deduction
+    SEVERITY_FATAL       = 4;  // fails the entire run
+}
+
+// ValidateRequest carries a batch of events for the plugin to inspect.
+// The plugin SHOULD return promptly — a missed deadline counts as
+// "no violations" for that batch.
+message ValidateRequest {
+    string                                       submission_id = 1;
+    string                                       benchmark_id  = 2;
+    repeated velocity.telemetry.v1.OrderEvent    orders        = 3;
+    repeated velocity.telemetry.v1.FillEvent     fills         = 4;
+}
+
+message ValidateResponse {
+    repeated Violation violations = 1;
+    // Plugin-side metrics for observability. Free-form key/value map.
+    // The orchestrator surfaces a stable subset under Grafana.
+    map<string, double> metrics   = 2;
+}
+
+// PluginValidator is the contract every plugin sidecar implements.
+service PluginValidator {
+    rpc GetInfo  (google.protobuf.Empty) returns (PluginInfo);
+    rpc Validate (ValidateRequest)       returns (ValidateResponse);
+    // Heartbeat returns the orchestrator's liveness probe target. We
+    // could do this with the standard gRPC health check, but bundling
+    // it lets the plugin author push their own custom status.
+    rpc Heartbeat(google.protobuf.Empty) returns (HeartbeatResponse);
+}
+
+message HeartbeatResponse {
+    enum Status {
+        STATUS_UNSPECIFIED = 0;
+        STATUS_OK          = 1;
+        STATUS_DEGRADED    = 2;
+        STATUS_UNHEALTHY   = 3;
+    }
+    Status status              = 1;
+    string detail              = 2;
+    int64  validate_count      = 3;
+    int64  violation_count     = 4;
+}

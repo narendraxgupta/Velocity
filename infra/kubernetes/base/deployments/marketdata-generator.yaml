@@ -1,0 +1,75 @@
+# =============================================================================
+#  marketdata-generator — stochastic OU + jump-shock fair-value publisher.
+#
+#  Workload-side characteristics
+#  -----------------------------
+#  - Single replica is sufficient: the generator is stateful (it owns the
+#    Markov process) and downstream consumers expect ONE canonical source
+#    of truth per symbol. Scaling horizontally would split the Wiener
+#    process, breaking correlations across replicas.
+#  - 100 Hz tick × ~3 symbols × 2 publishers = ~600 ops/sec — trivial.
+#  - We use a Service so other services (api-gateway, frontend) can hit
+#    the /snapshot introspection endpoint without going through Redis.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: marketdata-generator
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: marketdata-generator }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }    # one writer at a time, no rolling overlap
+  selector:
+    matchLabels: { app.kubernetes.io/name: marketdata-generator }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: marketdata-generator }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: marketdata
+          image: velocity/marketdata-generator:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8093 }
+          env:
+            - { name: MARKETDATA_TICK_MS,       value: "10" }
+            - { name: MARKETDATA_REDIS_ADDR,    value: "redis.velocity-data.svc.cluster.local:6379" }
+            - { name: MARKETDATA_KAFKA_BROKERS, value: "redpanda.velocity-data.svc.cluster.local:9092" }
+            - { name: MARKETDATA_KAFKA_TOPIC,   value: "marketdata.ticks" }
+            - { name: MARKETDATA_HTTP_ADDR,     value: ":8093" }
+            # SEED=0 → wall-clock, recommended for production. For
+            # reproducible chaos benchmarks the overlay sets this to a
+            # fixed integer.
+            - { name: MARKETDATA_SEED,          value: "0" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+            timeoutSeconds: 3
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: marketdata-generator
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: marketdata-generator }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: marketdata-generator }
+  ports:
+    - { name: http, port: 8093, targetPort: http }

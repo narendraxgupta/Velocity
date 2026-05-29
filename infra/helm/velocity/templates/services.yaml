@@ -1,0 +1,100 @@
+{{/*
+  Generic Deployment + Service template for the rest of the platform.
+
+  Why one template for many services?
+  -----------------------------------
+  Velocity's services follow ONE shape: a Deployment of N replicas with
+  a single container talking to Redis + Kafka, exposing one HTTP and/or
+  gRPC port. Maintaining 15 nearly-identical YAML files is a tax we
+  shouldn't pay; loop here, special-case only what differs.
+
+  The api-gateway gets its own template because it carries the JWT
+  secret material and the Ingress contract. The bot-worker also gets
+  its own because of the eBPF / capabilities branching.
+*/}}
+
+{{- $services := list
+    (dict "key" "submissionEngine"   "name" "submission-engine"   "port" 50051 "portName" "grpc")
+    (dict "key" "botController"      "name" "bot-controller"      "port" 50052 "portName" "grpc")
+    (dict "key" "telemetryIngester"  "name" "telemetry-ingester"  "port" 8087  "portName" "http")
+    (dict "key" "correctnessValidator" "name" "correctness-validator" "port" 8088 "portName" "http")
+    (dict "key" "scoringService"     "name" "scoring-service"     "port" 8089 "portName" "http")
+    (dict "key" "leaderboardWS"      "name" "leaderboard-ws"      "port" 8090 "portName" "http")
+    (dict "key" "frontend"           "name" "frontend"            "port" 3000 "portName" "http")
+    (dict "key" "chaosOrchestrator"  "name" "chaos-orchestrator"  "port" 8091 "portName" "http")
+    (dict "key" "pcapRecorder"       "name" "pcap-recorder"       "port" 8092 "portName" "http")
+    (dict "key" "pcapReplayer"       "name" "pcap-replayer"       "port" 8093 "portName" "http")
+    (dict "key" "marketdataGenerator" "name" "marketdata-generator" "port" 8093 "portName" "http")
+    (dict "key" "critiqueService"    "name" "critique-service"    "port" 8094 "portName" "http")
+    (dict "key" "anomalyDetector"    "name" "anomaly-detector"    "port" 8095 "portName" "http")
+    (dict "key" "auditLog"           "name" "audit-log"           "port" 8081 "portName" "http")
+    (dict "key" "pluginOrchestrator" "name" "plugin-orchestrator" "port" 8082 "portName" "http")
+}}
+
+{{- $controlNs := printf "%s-control" .Release.Name }}
+
+{{- range $svc := $services }}
+{{- $cfg := index $.Values $svc.key }}
+{{- if $cfg.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $svc.name }}
+  namespace: {{ $controlNs }}
+  labels:
+    {{- include "velocity.commonLabels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $svc.name }}
+spec:
+  replicas: {{ default 1 $cfg.replicas }}
+  selector:
+    matchLabels:
+      {{- include "velocity.selectorLabels" (list $ $svc.name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "velocity.selectorLabels" (list $ $svc.name) | nindent 8 }}
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, seccompProfile: { type: RuntimeDefault } }
+      {{- with $.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $svc.name }}
+          image: {{ include "velocity.image" (dict "ctx" $ "image" (default $svc.name $cfg.image)) }}
+          imagePullPolicy: {{ $.Values.global.pullPolicy }}
+          ports:
+            - name: {{ $svc.portName }}
+              containerPort: {{ $svc.port }}
+          env:
+            - { name: REDIS_ADDR,    value: "{{ include "velocity.redisAddr" $ }}" }
+            - { name: KAFKA_BROKERS, value: "{{ include "velocity.kafkaBrokers" $ }}" }
+            {{- if and (eq $svc.key "critiqueService") $cfg.ollamaUrl }}
+            - { name: CRITIQUE_OLLAMA_URL, value: "{{ $cfg.ollamaUrl }}" }
+            {{- end }}
+          resources:
+            {{- toYaml (default (dict "requests" (dict "cpu" "100m" "memory" "128Mi") "limits" (dict "cpu" "500m" "memory" "512Mi")) $cfg.resources) | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc.name }}
+  namespace: {{ $controlNs }}
+  labels:
+    {{- include "velocity.commonLabels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $svc.name }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "velocity.selectorLabels" (list $ $svc.name) | nindent 4 }}
+  ports:
+    - name: {{ $svc.portName }}
+      port: {{ $svc.port }}
+      targetPort: {{ $svc.portName }}
+{{- end }}
+{{- end }}

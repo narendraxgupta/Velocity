@@ -1,0 +1,110 @@
+# =============================================================================
+#  plugin-orchestrator — provisions tenant validator sidecars.
+#
+#  Needs cluster-scoped Get/List/Watch + namespace-scoped Create/Update
+#  on Deployments + Services. We narrow this to the velocity-tenant-*
+#  namespace pattern via a small Role + RoleBinding pair per tenant
+#  (created lazily). The ClusterRole below is the *baseline* — it has
+#  no namespace bindings; specific tenants get their bindings only when
+#  the orchestrator first reconciles a manifest for them.
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: plugin-orchestrator
+  namespace: velocity-control
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: plugin-orchestrator
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps", "events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Cluster-scoped list of namespaces so we can validate that the
+  # tenant namespace exists before deploying to it.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: plugin-orchestrator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: plugin-orchestrator
+subjects:
+  - kind: ServiceAccount
+    name: plugin-orchestrator
+    namespace: velocity-control
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plugin-orchestrator
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: plugin-orchestrator }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: plugin-orchestrator }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: plugin-orchestrator }
+    spec:
+      serviceAccountName: plugin-orchestrator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: orchestrator
+          image: velocity/plugin-orchestrator:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --watch=/etc/velocity/plugins
+            - --http=:8082
+            - --interval=30s
+          ports:
+            - { name: http, containerPort: 8082 }
+          env:
+            - { name: REDIS_ADDR, value: "redis.velocity-data.svc.cluster.local:6379" }
+          volumeMounts:
+            - { name: manifests, mountPath: /etc/velocity/plugins, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: manifests
+          configMap:
+            name: plugin-registries
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: plugin-orchestrator
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: plugin-orchestrator }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: plugin-orchestrator }
+  ports:
+    - { name: http, port: 8082, targetPort: http }

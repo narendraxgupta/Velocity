@@ -1,0 +1,69 @@
+# =============================================================================
+#  audit-log — append-only audit pipeline.
+#
+#  Lives in velocity-control because it owns a privileged read on the
+#  audit-events stream and writes to the data-plane QuestDB. We run a
+#  single replica to keep the per-tenant chain head consistent without
+#  a leader election dance; if the daemon dies new events accumulate in
+#  the Redis Stream until the pod restarts (capped at MAXLEN ~ 1M).
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-log
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: audit-log }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: audit-log }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: audit-log }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: audit-log
+          image: velocity/audit-log:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8081 }
+          env:
+            - { name: REDIS_ADDR,      value: "redis.velocity-data.svc.cluster.local:6379" }
+            - { name: QUESTDB_HOST,    value: "questdb.velocity-data.svc.cluster.local" }
+            - { name: QUESTDB_ILP_PORT, value: "9009" }
+            - { name: KAFKA_BROKERS,   value: "redpanda.velocity-data.svc.cluster.local:9092" }
+            - { name: KAFKA_GROUP,     value: "audit-log" }
+            - { name: HTTP_PORT,       value: "8081" }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+            timeoutSeconds: 3
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-log
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: audit-log }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: audit-log }
+  ports:
+    - { name: http, port: 8081, targetPort: http }

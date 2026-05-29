@@ -1,0 +1,29 @@
+# =============================================================================
+#  Prometheus Operator PodMonitor.
+#
+#  Pod-level prometheus.io/scrape annotations are advisory; the operator only
+#  honours ServiceMonitor + PodMonitor. We use a single PodMonitor scoped to
+#  every Velocity namespace and rely on the `prometheus.io/port` annotation
+#  baked into each Deployment for endpoint discovery.
+# =============================================================================
+
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: velocity-services
+  namespace: velocity-control
+  labels:
+    app.kubernetes.io/part-of: velocity
+spec:
+  selector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: Exists }
+  namespaceSelector:
+    matchNames:
+      - velocity-control
+      - velocity-load
+      - velocity-data
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics

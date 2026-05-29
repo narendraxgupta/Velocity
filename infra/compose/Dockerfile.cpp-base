@@ -1,0 +1,73 @@
+# =============================================================================
+# velocity/cpp-base — shared multi-stage build base for every C++ service.
+#
+# Stages
+#   tooling   : compilers, conan, cmake, ninja, protoc
+#   deps      : runs `conan install` against the repo's conanfile.py
+#   builder   : runs `cmake --build`
+#   runtime   : distroless-style minimal final image — copy ONE binary in
+#
+# Per-service Dockerfiles `FROM velocity/cpp-base AS builder` and then
+# `COPY --from=builder /app/build/bin/<service> /usr/local/bin/<service>` into
+# a thin runtime layer. This keeps service-specific Dockerfiles ~15 lines.
+# =============================================================================
+
+# ---- tooling ----------------------------------------------------------------
+FROM ubuntu:24.04 AS tooling
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    PIP_BREAK_SYSTEM_PACKAGES=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        curl \
+        ca-certificates \
+        gnupg \
+        ninja-build \
+        pkg-config \
+        python3 \
+        python3-pip \
+        python3-venv \
+        zip unzip \
+        mold \
+        lld \
+        libssl-dev \
+        liburing-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# CMake 3.30+ from Kitware
+RUN curl -fsSL https://apt.kitware.com/keys/kitware-archive-latest.asc \
+      | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg \
+ && echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ noble main' \
+      > /etc/apt/sources.list.d/kitware.list \
+ && apt-get update && apt-get install -y --no-install-recommends cmake \
+ && rm -rf /var/lib/apt/lists/*
+
+# Conan 2.x
+RUN pip3 install --no-cache-dir 'conan>=2.7,<3' \
+ && conan profile detect --force
+
+# ---- deps -------------------------------------------------------------------
+FROM tooling AS deps
+
+WORKDIR /app
+COPY conanfile.py ./
+RUN conan install . --build=missing \
+        -s build_type=Release \
+        -s compiler.cppstd=20 \
+        -s compiler.libcxx=libstdc++11
+
+# ---- builder ----------------------------------------------------------------
+FROM deps AS builder
+
+WORKDIR /app
+COPY CMakeLists.txt ./
+COPY cmake/ ./cmake/
+COPY proto/ ./proto/
+COPY services/ ./services/
+COPY scripts/sample-exchange/ ./scripts/sample-exchange/
+
+RUN cmake --preset conan-release \
+ && cmake --build --preset conan-release --parallel

@@ -1,0 +1,99 @@
+{{/*
+  bot-worker.yaml — dedicated template for the bot worker.
+
+  Bot-worker is *not* in the generic services.yaml loop because it's
+  the only service that needs:
+    - Optional Linux capabilities (CAP_BPF, CAP_PERFMON) when eBPF is on.
+    - A privileged hostPath mount for /sys/kernel/debug when running
+      kprobes against the host kernel.
+    - The gVisor runtime is NOT applied here — bot-worker IS the trusted
+      bot fleet; the sandboxed workload it talks to runs in a separate
+      sandbox namespace via the submission-engine.
+
+  All of this is gated. The default is "eBPF off, no caps" which is the
+  shape that runs on managed K8s (EKS/GKE/AKS) without admin tweaks.
+*/}}
+
+{{- $controlNs := printf "%s-control" .Release.Name }}
+{{- $cfg := .Values.botWorker }}
+
+{{- if $cfg.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bot-worker
+  namespace: {{ $controlNs }}
+  labels:
+    {{- include "velocity.commonLabels" . | nindent 4 }}
+    app.kubernetes.io/name: bot-worker
+spec:
+  replicas: {{ default 1 $cfg.replicas }}
+  selector:
+    matchLabels:
+      {{- include "velocity.selectorLabels" (list . "bot-worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "velocity.selectorLabels" (list . "bot-worker") | nindent 8 }}
+    spec:
+      {{/* Run as non-root by default. When CAP_BPF is enabled we
+           still keep runAsNonRoot true — recent kernels (5.8+) allow
+           non-root processes to load BPF programs if they hold
+           CAP_BPF + CAP_PERFMON. */}}
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, seccompProfile: { type: RuntimeDefault } }
+      {{- with $.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: bot-worker
+          image: {{ include "velocity.image" (dict "ctx" $ "image" (default "bot-worker" $cfg.image)) }}
+          imagePullPolicy: {{ $.Values.global.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8086 }
+          env:
+            - { name: REDIS_ADDR,    value: "{{ include "velocity.redisAddr" $ }}" }
+            - { name: KAFKA_BROKERS, value: "{{ include "velocity.kafkaBrokers" $ }}" }
+            {{- if $cfg.capabilities.bpf }}
+            - { name: VELOCITY_EBPF_ENABLED, value: "true" }
+            {{- end }}
+          resources:
+            {{- toYaml (default (dict "requests" (dict "cpu" "500m" "memory" "512Mi") "limits" (dict "cpu" "2" "memory" "2Gi")) $cfg.resources) | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            {{- if $cfg.capabilities.bpf }}
+            capabilities:
+              drop: ["ALL"]
+              add: ["BPF", "PERFMON"]
+            {{- else }}
+            capabilities: { drop: ["ALL"] }
+            {{- end }}
+          {{- if $cfg.capabilities.bpf }}
+          volumeMounts:
+            - { name: kernel-debug, mountPath: /sys/kernel/debug, readOnly: true }
+          {{- end }}
+      {{- if $cfg.capabilities.bpf }}
+      volumes:
+        - name: kernel-debug
+          hostPath:
+            path: /sys/kernel/debug
+            type: Directory
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bot-worker
+  namespace: {{ $controlNs }}
+  labels:
+    {{- include "velocity.commonLabels" . | nindent 4 }}
+    app.kubernetes.io/name: bot-worker
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "velocity.selectorLabels" (list . "bot-worker") | nindent 4 }}
+  ports:
+    - { name: http, port: 8086, targetPort: http }
+{{- end }}

@@ -1,0 +1,58 @@
+# =============================================================================
+#  Velocity — Sandbox NetworkPolicies
+#
+#  Layered defense for submission containers:
+#
+#    1. Default-deny ALL ingress and egress.
+#    2. Permit ingress ONLY from `velocity-load` (the bot fleet).
+#    3. No egress at all — submissions cannot exfiltrate data, scan our
+#       network, or talk to the internet. We deliberately do not allow DNS
+#       so that even if a submission somehow loads malware, it cannot
+#       resolve a C2 host.
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: velocity-sandbox
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-from-bot-fleet
+  namespace: velocity-sandbox
+spec:
+  # Must match the labels stamped onto sandbox pods by
+  # services/submission-engine/internal/sandbox/sandbox.go::Launch.
+  # Keep these in sync if either side changes.
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: velocity
+      app.kubernetes.io/component: submission
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # Source namespace is velocity-load (see namespaces.yaml). The
+        # label below is set there to make this selector explicit.
+        - namespaceSelector:
+            matchLabels:
+              velocity.tier: load-gen
+      ports:
+        # Submission containers expose their HTTP/REST endpoint here.
+        # Keep aligned with sandbox.Config.ServicePort (default 8080).
+        - protocol: TCP
+          port: 8080
+        # Optional WebSocket / FIX listeners we support out of the box.
+        - protocol: TCP
+          port: 7000
+        - protocol: TCP
+          port: 7001
+        - protocol: TCP
+          port: 7002

@@ -1,0 +1,93 @@
+# =============================================================================
+#  chaos-orchestrator — HTTP control-plane for chaos injection.
+#
+#  Runs in velocity-control with elevated RBAC: it needs to delete pods,
+#  add ephemeral containers (for tc / iptables / cgroup tweaks), and read
+#  pod metadata. The RBAC is scoped to namespaces in CHAOS_NAMESPACES.
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaos-orchestrator
+  namespace: velocity-control
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chaos-orchestrator
+rules:
+  # Pod read + delete + ephemeralcontainers patch — the actual chaos verbs.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/ephemeralcontainers"]
+    verbs: ["update", "patch"]
+  # Used by the reaper to identify pods carrying chaos labels.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: chaos-orchestrator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: chaos-orchestrator
+subjects:
+  - kind: ServiceAccount
+    name: chaos-orchestrator
+    namespace: velocity-control
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chaos-orchestrator
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: chaos-orchestrator }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: chaos-orchestrator }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: chaos-orchestrator }
+    spec:
+      serviceAccountName: chaos-orchestrator
+      automountServiceAccountToken: true   # needs the SA token for the K8s API
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: chaos
+          image: velocity/chaos-orchestrator:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8090 }
+          env:
+            - { name: CHAOS_HTTP_ADDR,        value: "0.0.0.0:8090" }
+            - { name: CHAOS_NAMESPACES,       value: "velocity-sandbox,velocity-load" }
+            - { name: CHAOS_INJECTOR_IMAGE,   value: "ghcr.io/velocity/perf-profiler:latest" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: chaos-orchestrator, namespace: velocity-control }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: chaos-orchestrator }
+  ports:
+    - { name: http, port: 8090, targetPort: http }

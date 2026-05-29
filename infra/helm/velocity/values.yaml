@@ -1,0 +1,173 @@
+# =============================================================================
+#  Velocity Helm chart — default values.
+#
+#  Override these per-environment with `helm install -f overrides.yaml ...`.
+#  We deliberately keep the value names FLAT and SHORT — long YAML paths
+#  are the leading source of Helm pain.
+# =============================================================================
+
+global:
+  # The image registry prefix that all service images live under.
+  # Example: "ghcr.io/velocity-platform" → ghcr.io/velocity-platform/api-gateway:<tag>
+  registry: ghcr.io/velocity-platform
+  tag: latest
+  pullPolicy: IfNotPresent
+  # Image-pull secrets created in the velocity-* namespaces. See
+  # templates/imagepullsecrets.yaml.
+  imagePullSecrets: []
+  # Pod security standard for the control-plane namespaces. The
+  # sandbox + tenant namespaces are always "restricted" regardless.
+  podSecurityStandard: baseline
+
+namespaces:
+  # Set to "true" to create the four namespaces declared in
+  # templates/namespaces.yaml. Disable if you're installing into a
+  # namespace already managed by your platform team.
+  create: true
+
+# ---------- application services --------------------------------------------
+
+apiGateway:
+  enabled: true
+  replicas: 2
+  image: api-gateway
+  port: 8080
+  requireAuth: false       # set true once your IdP issues tokens
+  jwtSecretBase64: ""      # HS256 secret, base64url
+  resources:
+    requests: { cpu: 250m,  memory: 256Mi }
+    limits:   { cpu: 1500m, memory: 1Gi   }
+
+submissionEngine:
+  enabled: true
+  replicas: 1
+  image: submission-engine
+  grpcPort: 50051
+  resources:
+    requests: { cpu: 250m,  memory: 256Mi }
+    limits:   { cpu: 1,     memory: 1Gi   }
+
+botController:
+  enabled: true
+  replicas: 1
+  image: bot-controller
+  grpcPort: 50052
+  resources:
+    requests: { cpu: 500m,  memory: 512Mi }
+    limits:   { cpu: 2,     memory: 2Gi   }
+
+botWorker:
+  enabled: true
+  replicas: 2
+  image: bot-worker
+  resources:
+    requests: { cpu: 1,     memory: 1Gi  }
+    limits:   { cpu: 4,     memory: 4Gi  }
+  # eBPF features are gated behind these Linux capabilities. Set to
+  # false on managed-K8s offerings that don't allow CAP_BPF.
+  capabilities:
+    bpf: true
+
+telemetryIngester:
+  enabled: true
+  replicas: 1
+  image: telemetry-ingester
+
+correctnessValidator:
+  enabled: true
+  replicas: 1
+  image: correctness-validator
+  pluginFanout: true
+
+scoringService:
+  enabled: true
+  replicas: 1
+  image: scoring-service
+
+leaderboardWS:
+  enabled: true
+  replicas: 2
+  image: leaderboard-ws
+  port: 8090
+
+frontend:
+  enabled: true
+  replicas: 2
+  image: frontend
+  port: 3000
+
+# ---------- auxiliary services ----------------------------------------------
+
+chaosOrchestrator: { enabled: true, replicas: 1, image: chaos-orchestrator }
+pcapRecorder:      { enabled: true, replicas: 1, image: pcap-recorder }
+pcapReplayer:      { enabled: true, replicas: 1, image: pcap-replayer }
+marketdataGenerator: { enabled: true, replicas: 1, image: marketdata-generator }
+critiqueService:   { enabled: false, replicas: 1, image: critique-service, ollamaUrl: "" }
+anomalyDetector:   { enabled: true,  replicas: 1, image: anomaly-detector }
+auditLog:          { enabled: true,  replicas: 1, image: audit-log }
+pluginOrchestrator: { enabled: true, replicas: 1, image: plugin-orchestrator }
+
+# ---------- data plane ------------------------------------------------------
+
+redis:
+  # `internal` deploys a single StatefulSet. `external` skips deployment
+  # and points services at the provided address.
+  mode: internal           # internal | external
+  external:
+    addr: ""
+  # NB: we use the official upstream Redis image — `bitnami/redis` has
+  # its own entrypoint script that interprets env vars rather than
+  # `redis-server` arguments, so the data-plane template's args list
+  # is incompatible with it. Override only if you have a Bitnami
+  # values override too.
+  image: redis:7.4-alpine
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+
+redpanda:
+  mode: internal
+  external:
+    brokers: ""
+  image: redpandadata/redpanda:v24.2.5
+  replicas: 1              # bump to 3 for HA prod
+  resources:
+    requests: { cpu: 1, memory: 2Gi }
+
+questdb:
+  mode: internal
+  external:
+    pg: ""                 # postgres://user:pass@host:8812/qdb
+    ilp: ""                # host:9009
+  image: questdb/questdb:8.1.1
+  storageSize: 100Gi
+
+minio:
+  mode: internal
+  external:
+    endpoint: ""
+    accessKey: ""
+    secretKey: ""
+  image: minio/minio:RELEASE.2024-09-13T20-26-02Z
+  storageSize: 50Gi
+
+# ---------- observability ---------------------------------------------------
+
+observability:
+  prometheus:
+    enabled: true
+    scrapeInterval: 15s
+  jaeger:
+    enabled: true
+  grafana:
+    enabled: true
+    anonymous: true
+
+# ---------- ingress ---------------------------------------------------------
+
+ingress:
+  enabled: false
+  className: nginx
+  host: velocity.local
+  tls:
+    enabled: false
+    secretName: velocity-tls

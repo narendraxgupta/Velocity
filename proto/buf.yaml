@@ -1,0 +1,21 @@
+# =============================================================================
+# Velocity — buf.build configuration
+#
+# We use `buf` for proto linting and breaking-change detection in CI. The
+# generation step is driven by `make proto` which shells out to `buf generate`.
+# =============================================================================
+
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    # Our enum zero values intentionally embed the type for safety.
+    - ENUM_ZERO_VALUE_SUFFIX
+  enum_zero_value_suffix: _UNSPECIFIED
+  service_suffix: Service
+breaking:
+  use:
+    - FILE

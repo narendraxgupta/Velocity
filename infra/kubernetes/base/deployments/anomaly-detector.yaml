@@ -1,0 +1,66 @@
+# =============================================================================
+#  anomaly-detector — IsolationForest health scorer.
+#
+#  Single replica: the detector is stateful (sliding window of recent
+#  submissions). A second replica would maintain a parallel window and
+#  produce inconsistent verdicts. The scoring path is sub-ms so one pod
+#  is plenty even at peak.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anomaly-detector
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: anomaly-detector }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: anomaly-detector }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: anomaly-detector }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: anomaly
+          image: velocity/anomaly-detector:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8095 }
+          env:
+            - { name: ANOMALY_REDIS_ADDR,  value: "redis://redis.velocity-data.svc.cluster.local:6379/0" }
+            - { name: ANOMALY_WINDOW_SIZE, value: "256" }
+            - { name: ANOMALY_REFIT_EVERY, value: "8" }
+            - { name: ANOMALY_CONTAM,      value: "0.05" }
+            - { name: LOG_LEVEL,           value: INFO }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false   # sklearn writes a tiny cache dir
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anomaly-detector
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: anomaly-detector }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: anomaly-detector }
+  ports:
+    - { name: http, port: 8095, targetPort: http }

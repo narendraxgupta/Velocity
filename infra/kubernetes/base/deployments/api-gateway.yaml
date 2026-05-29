@@ -1,0 +1,87 @@
+# =============================================================================
+#  velocity-api-gateway — Deployment + Service.
+#
+#  Front-door HTTP/WS. Two replicas behind a ClusterIP; production exposes it
+#  via an Ingress (managed in the prod overlay).
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: velocity-control
+  labels:
+    app.kubernetes.io/name: api-gateway
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: api-gateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "9091"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup:    65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: gateway
+          image: velocity/api-gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http,    containerPort: 8080 }
+            - { name: metrics, containerPort: 9091 }
+          env:
+            - { name: VELOCITY_HTTP_HOST,              value: "0.0.0.0" }
+            - { name: VELOCITY_HTTP_PORT,              value: "8080" }
+            - { name: VELOCITY_METRICS_PORT,           value: "9091" }
+            - { name: VELOCITY_SUBMISSION_ENGINE_GRPC, value: "submission-engine.velocity-control.svc.cluster.local:7001" }
+            - { name: VELOCITY_BOT_CONTROLLER_GRPC,    value: "bot-controller.velocity-control.svc.cluster.local:7101" }
+            - { name: VELOCITY_REDIS_ADDR,             value: "redis.velocity-data.svc.cluster.local:6379" }
+            - name: VELOCITY_MINIO_ENDPOINT
+              value: "minio.velocity-data.svc.cluster.local:9000"
+            - name: VELOCITY_MINIO_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: minio-creds, key: access-key } }
+            - name: VELOCITY_MINIO_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: minio-creds, key: secret-key } }
+            - { name: VELOCITY_CHAOS_URL,    value: "http://chaos-orchestrator.velocity-control.svc.cluster.local:8090" }
+            - { name: VELOCITY_RECORDER_URL, value: "http://pcap-recorder.velocity-control.svc.cluster.local:8091" }
+            - { name: VELOCITY_REPLAYER_URL, value: "http://pcap-replayer.velocity-control.svc.cluster.local:8092" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits:   { cpu: 1,    memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem:   true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: velocity-control
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: api-gateway
+  ports:
+    - { name: http,    port: 80,   targetPort: http }
+    - { name: metrics, port: 9091, targetPort: metrics }

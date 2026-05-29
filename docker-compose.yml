@@ -1,0 +1,324 @@
+# =============================================================================
+# Velocity — Local Development Stack
+#
+# One command (`make up`) brings up the full infrastructure: event bus,
+# time-series store, cache, object storage, observability, and registry.
+# Application services (api-gateway, bot-fleet, ingester, …) live in
+# `infra/compose/services.yml` and are composed on top via the `merge`
+# include directive — keeps the file digestible.
+#
+# Profiles
+# --------
+#   default            Always-on: data + observability + registry
+#   apps               The C++ / Go services (built from local source)
+#   debug              Adds redpanda-console, prometheus, grafana, jaeger
+#   bench              Loads the benchmark profile fixtures
+#
+# Usage
+# -----
+#   docker compose --profile default --profile debug up -d
+#   docker compose --profile default --profile apps up -d
+# =============================================================================
+
+name: velocity
+
+include:
+  - infra/compose/services.yml
+
+# -----------------------------------------------------------------------------
+#  Shared YAML anchors — DRY for restart policy / logging / common labels
+# -----------------------------------------------------------------------------
+x-restart: &restart
+  restart: unless-stopped
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-velocity-labels: &velocity-labels
+  labels:
+    org.velocity.project: "platform"
+    org.velocity.managed-by: "docker-compose"
+
+# -----------------------------------------------------------------------------
+#  Networks
+# -----------------------------------------------------------------------------
+networks:
+  data:
+    name: velocity-data
+    driver: bridge
+  apps:
+    name: velocity-apps
+    driver: bridge
+  obs:
+    name: velocity-obs
+    driver: bridge
+
+# -----------------------------------------------------------------------------
+#  Volumes — named so they survive `docker compose down`, removed by
+#  `make nuke`.
+# -----------------------------------------------------------------------------
+volumes:
+  redpanda-data:
+  questdb-data:
+  redis-data:
+  minio-data:
+  registry-data:
+  prometheus-data:
+  grafana-data:
+  ollama-data:
+
+# =============================================================================
+#  Services
+# =============================================================================
+services:
+  # ---------------------------------------------------------------------------
+  #  Redpanda — Kafka API-compatible event bus. Single broker for dev; in
+  #  production we run a 3-broker cluster via the Redpanda Operator.
+  # ---------------------------------------------------------------------------
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: velocity-redpanda
+    <<: [*restart, *logging, *velocity-labels]
+    networks: [data, apps]
+    ports:
+      - "9092:9092"      # Kafka API
+      - "9644:9644"      # Admin API
+      - "8081:8081"      # Schema Registry
+      - "8082:8082"      # Pandaproxy (REST)
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=internal://0.0.0.0:29092,external://0.0.0.0:9092
+      - --advertise-kafka-addr=internal://redpanda:29092,external://localhost:9092
+      - --pandaproxy-addr=internal://0.0.0.0:28082,external://0.0.0.0:8082
+      - --advertise-pandaproxy-addr=internal://redpanda:28082,external://localhost:8082
+      - --schema-registry-addr=internal://0.0.0.0:8081
+      - --rpc-addr=redpanda:33145
+      - --advertise-rpc-addr=redpanda:33145
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --mode=dev-container
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  #  Redpanda Console — Kafka UI for debugging topics and consumer lag.
+  # ---------------------------------------------------------------------------
+  redpanda-console:
+    image: redpandadata/console:v2.7.2
+    container_name: velocity-redpanda-console
+    <<: [*restart, *logging, *velocity-labels]
+    profiles: [debug, default]
+    networks: [data, obs]
+    ports:
+      - "8085:8080"
+    environment:
+      KAFKA_BROKERS: redpanda:29092
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://redpanda:8081
+      CONNECT_ENABLED: "false"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  #  QuestDB — time-series store. ILP TCP on 9009 is the supported
+  #  high-throughput ingestion path (UDP was removed in QuestDB 7+).
+  #  Postgres wire on 8812 is for ad-hoc queries; HTTP REST on 9000 powers
+  #  the built-in console.
+  # ---------------------------------------------------------------------------
+  questdb:
+    image: questdb/questdb:8.1.1
+    container_name: velocity-questdb
+    <<: [*restart, *logging, *velocity-labels]
+    networks: [data, apps]
+    ports:
+      - "9000:9000"      # HTTP / REST / Web Console
+      - "9009:9009"      # ILP TCP (used by telemetry-ingester)
+      - "8812:8812"      # Postgres wire protocol
+    volumes:
+      - questdb-data:/var/lib/questdb
+      - ./infra/compose/config/questdb-server.conf:/var/lib/questdb/conf/server.conf:ro
+    environment:
+      QDB_PG_USER: velocity
+      QDB_PG_PASSWORD: velocity-dev
+      QDB_PG_DATABASE: qdb
+      QDB_TELEMETRY_ENABLED: "false"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/exec?query=select+1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  #  Redis — leaderboard cache (Sorted Sets) and Pub/Sub fanout.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7.4.1-alpine
+    container_name: velocity-redis
+    <<: [*restart, *logging, *velocity-labels]
+    networks: [data, apps]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "512mb"
+      - --maxmemory-policy
+      - allkeys-lru
+      - --tcp-backlog
+      - "511"
+      - --tcp-keepalive
+      - "60"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ---------------------------------------------------------------------------
+  #  MinIO — S3-compatible object storage for submission artefacts.
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:RELEASE.2024-10-29T16-01-48Z
+    container_name: velocity-minio
+    <<: [*restart, *logging, *velocity-labels]
+    networks: [data, apps]
+    ports:
+      - "9100:9000"      # S3 API
+      - "9101:9001"      # Web console
+    volumes:
+      - minio-data:/data
+    environment:
+      MINIO_ROOT_USER: velocity
+      MINIO_ROOT_PASSWORD: velocity-dev-secret
+      MINIO_REGION: us-east-1
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ---------------------------------------------------------------------------
+  #  minio-init — one-shot job: create the `velocity` bucket and apply the
+  #  bucket policy. Exits cleanly; depended on by submission-engine.
+  # ---------------------------------------------------------------------------
+  minio-init:
+    image: minio/mc:RELEASE.2024-10-29T15-34-59Z
+    container_name: velocity-minio-init
+    <<: [*velocity-labels]
+    networks: [data]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set velocity http://minio:9000 velocity velocity-dev-secret
+        mc mb --ignore-existing velocity/submissions
+        mc mb --ignore-existing velocity/reports
+        mc anonymous set download velocity/reports
+        echo "MinIO buckets ready."
+
+  # ---------------------------------------------------------------------------
+  #  Container registry — for the submission-engine to push submission images
+  #  built by Kaniko.
+  # ---------------------------------------------------------------------------
+  registry:
+    image: registry:2.8.3
+    container_name: velocity-registry
+    <<: [*restart, *logging, *velocity-labels]
+    networks: [data, apps]
+    ports:
+      - "5000:5000"
+    volumes:
+      - registry-data:/var/lib/registry
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+
+  # ---------------------------------------------------------------------------
+  #  Prometheus — metrics scrape. Service discovery via static config in
+  #  infra/compose/config/prometheus.yml.
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: velocity-prometheus
+    <<: [*restart, *logging, *velocity-labels]
+    profiles: [debug, default]
+    networks: [obs, apps, data]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/compose/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+      - --web.enable-lifecycle
+
+  # ---------------------------------------------------------------------------
+  #  Grafana — dashboards for the live operator view. Anonymous read access
+  #  enabled for local dev only.
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: velocity-grafana
+    <<: [*restart, *logging, *velocity-labels]
+    profiles: [debug, default]
+    networks: [obs]
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      GF_SECURITY_ADMIN_USER: velocity
+      GF_SECURITY_ADMIN_PASSWORD: velocity-dev
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    depends_on:
+      - prometheus
+
+  # ---------------------------------------------------------------------------
+  #  Jaeger — distributed tracing UI. OpenTelemetry SDKs in each service
+  #  point at this OTLP endpoint.
+  # ---------------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: velocity-jaeger
+    <<: [*restart, *logging, *velocity-labels]
+    profiles: [debug]
+    networks: [obs, apps]
+    ports:
+      - "16686:16686"    # UI
+      - "4317:4317"      # OTLP gRPC
+      - "4318:4318"      # OTLP HTTP
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"

@@ -1,0 +1,136 @@
+{
+  "title": "Velocity — Platform Vitals",
+  "uid": "velocity-platform-vitals",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "5s",
+  "timezone": "browser",
+  "time": { "from": "now-15m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "submission",
+        "label": "Submission",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(velocity_order_acks_total, submission_id)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Aggregate RPS (acks/sec)",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(velocity_order_acks_total{submission_id=~\"$submission\"}[1m]))",
+          "legendFormat": "rps"
+        }
+      ],
+      "options": { "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "thresholds" } } }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "p99 Latency (µs)",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(velocity_latency_ns_bucket{submission_id=~\"$submission\"}[1m]))) / 1000",
+          "legendFormat": "p99"
+        }
+      ],
+      "options": { "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "µs" } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Ingester Lag (msg)",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "max(velocity_ingester_lag_messages)",
+          "legendFormat": "lag"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Active Workers",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "count(up{job=~\"velocity-bot-worker.*\"} == 1)", "legendFormat": "alive" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "RPS — per submission",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (submission_id) (rate(velocity_order_acks_total{submission_id=~\"$submission\"}[30s]))",
+          "legendFormat": "{{submission_id}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "options": { "legend": { "displayMode": "table", "placement": "right" } }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Latency — p50 / p90 / p99 / p99.9",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50,  sum by (le) (rate(velocity_latency_ns_bucket{submission_id=~\"$submission\"}[1m]))) / 1000", "legendFormat": "p50  µs" },
+        { "expr": "histogram_quantile(0.90,  sum by (le) (rate(velocity_latency_ns_bucket{submission_id=~\"$submission\"}[1m]))) / 1000", "legendFormat": "p90  µs" },
+        { "expr": "histogram_quantile(0.99,  sum by (le) (rate(velocity_latency_ns_bucket{submission_id=~\"$submission\"}[1m]))) / 1000", "legendFormat": "p99  µs" },
+        { "expr": "histogram_quantile(0.999, sum by (le) (rate(velocity_latency_ns_bucket{submission_id=~\"$submission\"}[1m]))) / 1000", "legendFormat": "p99.9 µs" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "µs", "custom": { "fillOpacity": 10 } } }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Ingester throughput",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(rate(velocity_telemetry_consumed_total[30s]))", "legendFormat": "consumed/sec" },
+        { "expr": "sum(rate(velocity_questdb_writes_total[30s]))",    "legendFormat": "questdb writes/sec" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Correctness mismatches",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (submission_id, reason) (increase(velocity_correctness_mismatch_total{submission_id=~\"$submission\"}[5m]))",
+          "legendFormat": "{{submission_id}} · {{reason}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    }
+  ]
+}

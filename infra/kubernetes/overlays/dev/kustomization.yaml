@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Each base manifest already pins itself to the correct namespace
+# (velocity-control / velocity-load / velocity-data / velocity-sandbox), so we
+# deliberately do NOT set a global `namespace:` here — doing so would collapse
+# the multi-tier layout into a single namespace.
+
+resources:
+  - ../../base
+
+patches: []
+
+commonAnnotations:
+  velocity.io/cluster: dev
+  velocity.io/environment: local-k3d

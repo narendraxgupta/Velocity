@@ -1,0 +1,116 @@
+# =============================================================================
+#  Velocity — SDK release pipeline.
+#
+#  Triggered by tags shaped like sdk-v<MAJOR>.<MINOR>.<PATCH>, which we
+#  push from `make sdk-release VERSION=0.1.2`. The workflow:
+#
+#    1. Runs `buf generate` to refresh proto stubs.
+#    2. Builds + publishes the Go SDK as a Git tag (Go modules are
+#       fetched directly from the source repo, so "publish" = push tag).
+#    3. Builds + publishes the TypeScript SDK to GitHub Packages
+#       (registry: npm.pkg.github.com).
+#    4. Builds + publishes the Python SDK to GitHub Packages
+#       (registry: pypi-style endpoint on github.com).
+#
+#  Each language gets its own job — failures don't block the others.
+# =============================================================================
+
+name: release-sdk
+
+on:
+  push:
+    tags:
+      - 'sdk-v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  proto:
+    name: regenerate proto stubs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-setup-action@v1
+        with: { version: 1.45.0 }
+      - run: buf generate
+        working-directory: proto
+      - name: upload generated stubs
+        uses: actions/upload-artifact@v4
+        with:
+          name: proto-gen
+          path: proto/gen/
+
+  # ---------------------------------------------------------------------------
+  go:
+    name: publish Go SDK
+    needs: proto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: proto-gen, path: proto/gen/ }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.22' }
+      - name: tidy + smoke build
+        working-directory: sdk/go
+        run: |
+          go mod tidy
+          go build ./...
+          go vet ./...
+      # The Go module is consumed directly from the repo path
+      # github.com/velocity/platform/sdk/go @ <tag>, so no separate
+      # publish step is needed — pushing the tag IS the release.
+
+  # ---------------------------------------------------------------------------
+  typescript:
+    name: publish TS SDK to GitHub Packages
+    needs: proto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: proto-gen, path: proto/gen/ }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://npm.pkg.github.com/'
+          scope: '@velocity'
+      - name: install
+        working-directory: sdk/ts
+        run: npm ci || npm install
+      - name: build
+        working-directory: sdk/ts
+        run: npm run build
+      - name: publish
+        working-directory: sdk/ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish
+
+  # ---------------------------------------------------------------------------
+  python:
+    name: publish Python SDK to GitHub Packages
+    needs: proto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: proto-gen, path: proto/gen/ }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: install build tools
+        run: pip install build twine
+      - name: build wheel + sdist
+        working-directory: sdk/python
+        run: python -m build
+      - name: publish
+        working-directory: sdk/python
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          TWINE_REPOSITORY_URL: https://pypi.pkg.github.com/velocity-platform/velocity
+        run: twine upload --skip-existing dist/*

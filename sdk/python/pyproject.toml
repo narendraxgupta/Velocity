@@ -1,0 +1,49 @@
+# =============================================================================
+#  velocity-sdk — Python client for the Velocity benchmarking platform.
+# =============================================================================
+[build-system]
+requires      = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+[project]
+name            = "velocity-sdk"
+version         = "0.1.0"
+description     = "Official Python SDK for the Velocity benchmarking platform."
+readme          = "README.md"
+license         = { text = "Apache-2.0" }
+authors         = [{ name = "Velocity Platform", email = "devs@velocityhq.io" }]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "httpx>=0.27",
+    "typing-extensions>=4.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[project.urls]
+Homepage  = "https://github.com/velocity-platform/velocity"
+Source    = "https://github.com/velocity-platform/velocity/tree/main/sdk/python"
+
+[tool.hatch.build.targets.wheel]
+packages = ["velocity"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+strict = true

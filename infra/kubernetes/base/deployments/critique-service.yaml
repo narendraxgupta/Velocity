@@ -1,0 +1,77 @@
+# =============================================================================
+#  critique-service — local-LLM strategy critique generator.
+#
+#  Production wiring
+#  -----------------
+#  - Ollama itself is deployed as a StatefulSet on a GPU node-group
+#    with a separate Kustomize overlay (`overlays/prod-llm`). This
+#    base manifest just consumes its in-cluster Service via
+#    CRITIQUE_OLLAMA_URL.
+#  - We deliberately keep two replicas: one is enough for the request
+#    rate, but rolling restarts must not blank the frontend "Review"
+#    tab.
+#  - max_in_flight is set per-pod so two pods × 2 = 4 concurrent LLM
+#    calls cluster-wide. Raise once we measure GPU saturation.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: critique-service
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: critique-service }
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: critique-service }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: critique-service }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: critique
+          image: velocity/critique-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8094 }
+          env:
+            - { name: CRITIQUE_HTTP_ADDR,    value: ":8094" }
+            - { name: CRITIQUE_REDIS_ADDR,   value: "redis.velocity-data.svc.cluster.local:6379" }
+            - { name: CRITIQUE_OLLAMA_URL,   value: "http://ollama.velocity-llm.svc.cluster.local:11434" }
+            - { name: CRITIQUE_OLLAMA_MODEL, value: "qwen2.5-coder:7b" }
+            - { name: CRITIQUE_MAX_INFLIGHT, value: "2" }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: critique-service
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: critique-service }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: critique-service }
+  ports:
+    - { name: http, port: 8094, targetPort: http }

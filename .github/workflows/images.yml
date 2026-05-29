@@ -1,0 +1,112 @@
+name: images
+
+# Builds and pushes one OCI image per service. Triggered on tag pushes
+# (the canonical release path) and on demand. PR builds are *not* pushed
+# — the matrix runs in `ci.yml` for those.
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build"
+        type: string
+        default: "main"
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.service }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api-gateway
+            dockerfile: services/api-gateway/Dockerfile
+            context: .
+          - service: bot-controller
+            dockerfile: services/bot-fleet/controller/Dockerfile
+            context: .
+          - service: bot-worker
+            dockerfile: services/bot-fleet/worker/Dockerfile
+            context: .
+          - service: correctness-validator
+            dockerfile: services/correctness-validator/Dockerfile
+            context: .
+          - service: leaderboard-ws
+            dockerfile: services/leaderboard-ws/Dockerfile
+            context: .
+          - service: scoring-service
+            dockerfile: services/scoring-service/Dockerfile
+            context: .
+          # NB: submission-engine needs the monorepo root because its
+          # go.mod replaces against ../../proto/gen/go.
+          - service: submission-engine
+            dockerfile: services/submission-engine/Dockerfile
+            context: .
+          - service: telemetry-ingester
+            dockerfile: services/telemetry-ingester/Dockerfile
+            context: .
+          - service: frontend
+            dockerfile: frontend/Dockerfile
+            context: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # The submission-engine docker build expects proto/gen/go/*.go to be
+      # present in the build context (its go.mod replaces against that
+      # directory). All other services compile protos from .proto inside
+      # their own build (CMake invokes protoc).
+      - name: Generate proto stubs
+        if: matrix.service == 'submission-engine'
+        uses: bufbuild/buf-setup-action@v1
+        with: { github_token: ${{ secrets.GITHUB_TOKEN }} }
+      - name: Run buf generate
+        if: matrix.service == 'submission-engine'
+        run: buf generate
+        working-directory: proto
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/velocity-${{ matrix.service }}
+          tags: |
+            type=ref,event=tag
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          provenance: true
+          sbom: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}

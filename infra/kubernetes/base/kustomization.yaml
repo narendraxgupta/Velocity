@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespaces.yaml
+  - runtimeclass-gvisor.yaml
+  - networkpolicy-sandbox.yaml
+  - secrets.yaml
+  - servicemonitors.yaml
+
+  - deployments/api-gateway.yaml
+  - deployments/submission-engine.yaml
+  - deployments/bot-controller.yaml
+  - deployments/bot-worker.yaml
+  - deployments/telemetry-ingester.yaml
+  - deployments/correctness-validator.yaml
+  - deployments/scoring-service.yaml
+  - deployments/leaderboard-ws.yaml
+  - deployments/frontend.yaml
+  - deployments/chaos-orchestrator.yaml
+  - deployments/pcap-recorder.yaml
+  - deployments/pcap-replayer.yaml
+  - deployments/marketdata-generator.yaml
+  - deployments/critique-service.yaml
+  - deployments/anomaly-detector.yaml
+  - deployments/audit-log.yaml
+  - deployments/plugin-orchestrator.yaml
+
+  - statefulsets/redpanda.yaml
+  - statefulsets/questdb.yaml
+  - statefulsets/redis.yaml
+  - statefulsets/minio.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: velocity
+  app.kubernetes.io/managed-by: kustomize

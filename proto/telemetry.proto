@@ -1,0 +1,169 @@
+// =============================================================================
+// Velocity — telemetry.proto
+//
+// The high-volume event stream. Every order a bot sends, every acknowledgement
+// or fill the submission returns, lands in this schema and flows through
+// Redpanda.
+//
+// Performance note
+// ----------------
+// `OrderEvent` is the hottest message in the entire system. A single benchmark
+// can publish 50M+ of these. The schema is therefore optimized for size on the
+// wire (fixed-width integers, no nested messages where avoidable) and for
+// allocator-free encoding (`cc_enable_arenas`). Do not add `string` fields
+// here without a very good reason.
+// =============================================================================
+
+syntax = "proto3";
+
+package velocity.telemetry.v1;
+
+import "common.proto";
+
+option go_package        = "github.com/velocity/platform/proto/gen/go/telemetry/v1;telemetryv1";
+option cc_enable_arenas  = true;
+option optimize_for      = SPEED;
+
+// ---------------------------------------------------------------------------
+// OrderEvent — the canonical "one bot tried to do one thing" record.
+//
+// Each event is fully self-describing: the ingester does not need to join
+// against any other table to compute latency or attribute the request to a
+// submission. This is intentional and matches the broader principle of
+// "denormalize the hot path."
+// ---------------------------------------------------------------------------
+message OrderEvent {
+  // Stable identity ------------------------------------------------------
+  velocity.common.v1.CorrelationId correlation_id = 1;
+  velocity.common.v1.SubmissionId  submission_id  = 2;
+  uint32                           bot_id         = 3;   // Worker-local
+  uint32                           worker_id      = 4;   // Cluster-wide
+
+  // What was requested ---------------------------------------------------
+  velocity.common.v1.Side       side       = 10;
+  velocity.common.v1.OrderType  order_type = 11;
+  velocity.common.v1.Money      price      = 12;   // Absent for MARKET
+  velocity.common.v1.Money      quantity   = 13;
+  string                        symbol     = 14;   // "AAPL", "BTC-USD", ...
+
+  // Timing — nanos since epoch, captured with CLOCK_MONOTONIC_RAW translated
+  // to wallclock at publish time. The relative deltas are what we measure;
+  // absolute wallclock is only used for partitioning and replay.
+  fixed64 sent_ts_ns           = 20;  // Just before send() syscall
+  fixed64 ack_received_ts_ns   = 21;  // Just after recv() of ack — 0 if no ack
+  fixed64 fill_received_ts_ns  = 22;  // 0 if no fill received in test window
+
+  // Outcome ---------------------------------------------------------------
+  Outcome outcome     = 30;
+  velocity.common.v1.Money fill_price    = 31;
+  velocity.common.v1.Money fill_quantity = 32;
+
+  // Network attribution (for debugging latency anomalies) ----------------
+  velocity.common.v1.WireProtocol protocol      = 40;
+  uint32                          tcp_rtt_us    = 41;  // SO_TIMESTAMPING if available
+  uint32                          payload_bytes = 42;
+
+  // Open-loop bookkeeping ------------------------------------------------
+  // The intended send time according to the scheduler. ack_received_ts_ns
+  // - intended_ts_ns is the *honest* latency (coordinated-omission corrected).
+  fixed64 intended_ts_ns = 50;
+
+  // Was this a new order, a cancel, or a modify?
+  EventKind event_kind = 51;
+}
+
+// ---------------------------------------------------------------------------
+// What kind of action the bot intended to express.
+// ---------------------------------------------------------------------------
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED = 0;
+  EVENT_KIND_NEW         = 1;
+  EVENT_KIND_CANCEL      = 2;
+  EVENT_KIND_MODIFY      = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Outcome of a single order from the bot's perspective.
+//
+// Note that OUTCOME_ACKNOWLEDGED is *not* the same as filled — it just means
+// the submission's system responded within the timeout. The correctness
+// validator is what determines whether the fill was actually correct.
+// ---------------------------------------------------------------------------
+enum Outcome {
+  OUTCOME_UNSPECIFIED   = 0;
+  OUTCOME_ACKNOWLEDGED  = 1;   // Got an ack, no fill yet
+  OUTCOME_FILLED        = 2;   // Got a fill event
+  OUTCOME_PARTIAL_FILL  = 3;   // Got a partial fill
+  OUTCOME_REJECTED      = 4;   // Submission explicitly rejected
+  OUTCOME_TIMEOUT       = 5;   // No response within the per-order budget
+  OUTCOME_NETWORK_ERROR = 6;   // Connection reset, etc.
+  OUTCOME_CANCELLED     = 7;   // Cancel acknowledgement (for canceller persona)
+}
+
+// ---------------------------------------------------------------------------
+// FillEvent — derived from OrderEvent stream by the correctness validator.
+//
+// This is a *replay* of what the validator's reference orderbook believes
+// should have happened. Comparing this against the submission's reported
+// fills is how we compute the correctness score.
+// ---------------------------------------------------------------------------
+message FillEvent {
+  velocity.common.v1.CorrelationId taker_correlation_id = 1;
+  velocity.common.v1.CorrelationId maker_correlation_id = 2;
+  velocity.common.v1.SubmissionId  submission_id        = 3;
+
+  velocity.common.v1.Money fill_price    = 10;
+  velocity.common.v1.Money fill_quantity = 11;
+  fixed64                  match_ts_ns   = 12;
+
+  // The validator records which side of the trade was the aggressor. This
+  // lets us detect violations of price-time priority by comparing against
+  // the submission's reported aggressor.
+  velocity.common.v1.Side aggressor_side = 20;
+}
+
+// ---------------------------------------------------------------------------
+// LatencyBucket — a flushed slice of a per-submission HdrHistogram.
+//
+// The ingester aggregates raw OrderEvents into HdrHistograms in-process; every
+// 250 ms it serializes the histogram delta into one of these and publishes to
+// the `metrics.latency.1s` topic for the leaderboard service to consume.
+// ---------------------------------------------------------------------------
+message LatencyBucket {
+  velocity.common.v1.SubmissionId submission_id = 1;
+  fixed64                         window_start_ns = 2;
+  fixed64                         window_end_ns   = 3;
+
+  // The full HdrHistogram payload — base64-decoded form of HdrHistogram's
+  // log-encoded serialization. ~600 bytes for a typical 3-sigfig 1-hour range.
+  bytes hdr_histogram = 10;
+
+  // Pre-extracted summary for cheap consumers that do not want to parse the
+  // histogram. The full histogram is the source of truth; these are advisory.
+  uint64 count   = 20;
+  uint64 p50_ns  = 21;
+  uint64 p90_ns  = 22;
+  uint64 p99_ns  = 23;
+  uint64 p999_ns = 24;
+  uint64 max_ns  = 25;
+}
+
+// ---------------------------------------------------------------------------
+// CorrectnessReport — emitted by the validator every second per submission.
+// ---------------------------------------------------------------------------
+message CorrectnessReport {
+  velocity.common.v1.SubmissionId submission_id = 1;
+  fixed64 window_start_ns = 2;
+  fixed64 window_end_ns   = 3;
+
+  uint64 expected_fills = 10;
+  uint64 actual_fills   = 11;
+  uint64 correct_fills  = 12;
+
+  uint64 priority_violations = 20;  // Filled out-of-order at the same price
+  uint64 price_violations    = 21;  // Filled at a price better than the book
+  uint64 phantom_fills       = 22;  // Reported fill with no matching order
+  uint64 missing_fills       = 23;  // Should have filled, didn't
+
+  double correctness_score = 30;    // [0, 100] — see scoring.proto
+}

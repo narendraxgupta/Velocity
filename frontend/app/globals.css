@@ -1,0 +1,317 @@
+/*
+ * =============================================================================
+ *  Velocity — Global Styles
+ *
+ *  The design tokens live here as CSS custom properties. Tailwind references
+ *  them via `hsl(var(--token) / <alpha-value>)`. To re-skin the entire app,
+ *  edit the values in `:root` — every component reads from these.
+ * =============================================================================
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ----- Core surfaces (HSL triplets, no alpha) ----------------------- */
+    --background:           240  6%   4%;     /* #0A0A0B  */
+    --foreground:           240  6%  92%;     /* #E6E6EA  */
+    --surface:              240  7%   7%;     /* #101013  */
+    --surface-elevated:     240  7%   9%;     /* #16161A  */
+    --surface-subtle:       240  6%   6%;     /* #0E0E10  */
+
+    --border:               240  6%  14%;     /* #1F1F25  */
+    --border-subtle:        240  6%  11%;     /* #1A1A20  */
+
+    --muted:                240  6%  12%;
+    --muted-foreground:     240  5%  56%;     /* #7B7B85 - dimmed labels */
+
+    /* ----- Brand accent (violet) --------------------------------------- */
+    --accent:               251  100% 70%;    /* #7C66FF */
+    --accent-foreground:    240   6% 96%;
+    --accent-subtle:        251  100% 70%;
+
+    /* ----- Signal palette ---------------------------------------------- */
+    --signal-live:          155 100% 50%;     /* #10F095 — electric green */
+    --signal-bid:           155 100% 50%;
+    --signal-ask:           351  90% 60%;     /* #F43F5E */
+    --signal-warn:           36 100% 62%;     /* #FFA940 */
+    --signal-info:          189  90% 58%;     /* #22D3EE */
+    --signal-neutral:       240   6% 56%;
+
+    /* ----- Status colors ----------------------------------------------- */
+    --success:              155 100% 50%;
+    --warning:               36 100% 62%;
+    --info:                 189  90% 58%;
+    --destructive:          351  90% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    /* ----- Chart palette (colorblind-safe, max contrast) --------------- */
+    --chart-1:              155 100% 50%;     /* green   */
+    --chart-2:              251 100% 70%;     /* violet  */
+    --chart-3:              189  90% 58%;     /* cyan    */
+    --chart-4:               36 100% 62%;     /* amber   */
+    --chart-5:              351  90% 60%;     /* red     */
+    --chart-6:              290  80% 65%;     /* magenta */
+
+    /* ----- Layout primitives ------------------------------------------- */
+    --radius: 6px;
+    --header-h: 56px;
+    --aside-w: 240px;
+    --content-max-w: 1440px;
+
+    /* ----- Glassmorphism tokens (dark) --------------------------------
+     * Used by command palette, toasts, dialogs, popovers — anything that
+     * floats above the page. Values are HSLA-ready: the surface keeps a
+     * cool tint, the highlight is a near-white inner stroke that mimics
+     * the way real glass catches light along its top edge, and the
+     * shadow has both depth (drop) and presence (accent glow).
+     */
+    --glass-bg:           240 8% 8% / 0.55;       /* translucent surface */
+    --glass-bg-strong:    240 8% 6% / 0.72;       /* for inner sections inside a glass shell */
+    --glass-border:       240 10% 100% / 0.08;    /* subtle outer ring   */
+    --glass-highlight:    240 20% 100% / 0.10;    /* top-edge sheen      */
+    --glass-scrim:        240 10% 3% / 0.55;      /* overlay behind modal */
+
+    /* ----- Color scheme hint for the browser ---------------------------- */
+    color-scheme: dark;
+  }
+
+  /* ----- Light theme (accessibility opt-in) -------------------------- */
+  [data-theme='light'] {
+    --background:           240  10% 98%;
+    --foreground:           240  10%  8%;
+    --surface:              0    0% 100%;
+    --surface-elevated:     240   8% 96%;
+    --surface-subtle:       240   8% 94%;
+
+    --border:               240   8% 86%;
+    --border-subtle:        240   8% 90%;
+
+    --muted:                240   8% 92%;
+    --muted-foreground:     240   6% 42%;
+
+    --accent:               251  90% 52%;
+    --accent-foreground:    240   6% 96%;
+
+    --signal-live:          155  90% 32%;
+    --signal-bid:           155  90% 32%;
+    --signal-ask:           351  75% 42%;
+    --signal-warn:           36  90% 38%;
+    --signal-info:          189  80% 32%;
+    --signal-neutral:       240   6% 42%;
+
+    --success:              155  90% 32%;
+    --warning:               36  90% 38%;
+    --info:                 189  80% 32%;
+    --destructive:          351  75% 42%;
+
+    /* ----- Glassmorphism tokens (light) -------------------------------- */
+    --glass-bg:           0 0% 100% / 0.65;
+    --glass-bg-strong:    240 10% 98% / 0.85;
+    --glass-border:       240 12% 14% / 0.10;
+    --glass-highlight:    0 0% 100% / 0.65;
+    --glass-scrim:        240 10% 20% / 0.30;
+
+    color-scheme: light;
+  }
+
+  /* Reset + base */
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply antialiased;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+  }
+
+  /* Numbers, tickers, prices — always tabular, always monospace */
+  .font-mono,
+  .tabular,
+  [data-tabular],
+  th, td {
+    font-variant-numeric: tabular-nums slashed-zero;
+  }
+
+  /* Hide spinner from number inputs */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Custom scrollbar — Bloomberg-thin */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--surface-subtle));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
+
+  /* Selection */
+  ::selection {
+    background: hsl(var(--accent) / 0.35);
+    color: hsl(var(--foreground));
+  }
+
+  /* Focus rings — visible but understated */
+  :focus-visible {
+    outline: 2px solid hsl(var(--accent));
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}
+
+@layer components {
+  /* ----- Reusable terminal-style "Panel" with subtle border ----------- */
+  .panel {
+    @apply rounded-md border border-border bg-surface shadow-panel-sm;
+  }
+
+  .panel-elevated {
+    @apply rounded-md border border-border bg-surface-elevated shadow-panel-md;
+  }
+
+  /* ----- Section headers — Bloomberg uppercase labels ----------------- */
+  .label-eyebrow {
+    @apply text-2xs font-mono uppercase tracking-widest text-muted-foreground;
+  }
+
+  /* ----- Numerical display for prices / latency / TPS ----------------- */
+  .num {
+    @apply font-mono tabular-nums tracking-tight;
+  }
+
+  /* ----- "LIVE" status dot ------------------------------------------- */
+  .live-dot {
+    @apply relative inline-flex h-1.5 w-1.5 rounded-full bg-signal-live;
+  }
+  .live-dot::after {
+    content: '';
+    @apply absolute inset-0 rounded-full bg-signal-live animate-pulse-live;
+  }
+
+  /* ----- Grid background utility (used on hero / dashboards) ---------- */
+  .bg-grid {
+    @apply bg-grid-fine bg-[length:32px_32px];
+  }
+
+  /* ----- Shimmer skeleton -------------------------------------------- */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--surface-subtle)) 0%,
+      hsl(var(--surface-elevated)) 50%,
+      hsl(var(--surface-subtle)) 100%
+    );
+    @apply animate-shimmer bg-shimmer rounded;
+  }
+
+  /* ----- Form controls ----------------------------------------------- */
+  .form-input {
+    @apply h-9 rounded-md border border-border bg-surface-subtle px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent;
+  }
+
+  /* ----- Buttons ----------------------------------------------------- */
+  .btn-primary {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-accent/40 bg-accent/15 px-4 text-sm font-medium text-accent transition hover:bg-accent/25;
+  }
+
+  /* -----------------------------------------------------------------------
+   *  Glassmorphism surfaces.
+   *
+   *  Three layered classes:
+   *    .glass-scrim   — full-viewport overlay sitting behind a modal. Blurs
+   *                     the page content and tints it down so the modal pops.
+   *    .glass-panel   — translucent panel with frosted blur, saturated
+   *                     pass-through, outer ring, and a faint top-edge
+   *                     highlight that imitates real glass catching light.
+   *    .glass-soft    — the same effect but lighter (for toasts / popovers
+   *                     that should not dominate the page).
+   *
+   *  All three fall back gracefully on browsers without `backdrop-filter`
+   *  (e.g. old Firefox): they collapse to a high-opacity solid surface.
+   * --------------------------------------------------------------------- */
+  .glass-scrim {
+    background-color: hsl(var(--glass-scrim));
+    backdrop-filter:         blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+  }
+
+  .glass-panel {
+    position: relative;
+    background-color: hsl(var(--glass-bg));
+    border: 1px solid hsl(var(--glass-border));
+    backdrop-filter:         blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    box-shadow:
+      0 32px 80px -16px rgb(0 0 0 / 0.65),
+      0 12px 32px -8px  rgb(0 0 0 / 0.45),
+      0 0 0 1px hsl(var(--accent) / 0.05),
+      inset 0 1px 0 0 hsl(var(--glass-highlight));
+  }
+
+  /* Top-edge sheen — a thin gradient bar that imitates the way light
+   * hits the rim of a frosted glass panel. Kept inside the rounded
+   * border via `inherit` and pointer-events-none so it never interferes. */
+  .glass-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      180deg,
+      hsl(var(--glass-highlight)) 0%,
+      transparent 28%,
+      transparent 72%,
+      hsl(var(--glass-border)) 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .glass-soft {
+    background-color: hsl(var(--glass-bg));
+    border: 1px solid hsl(var(--glass-border));
+    backdrop-filter:         blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow:
+      0 12px 28px -10px rgb(0 0 0 / 0.55),
+      0 2px 8px -2px    rgb(0 0 0 / 0.35),
+      inset 0 1px 0 0   hsl(var(--glass-highlight));
+  }
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass-scrim { background-color: hsl(var(--background) / 0.92); }
+    .glass-panel,
+    .glass-soft  { background-color: hsl(var(--surface-elevated) / 0.96); }
+  }
+}
+
+@layer utilities {
+  /* Hide an element but keep it in the accessibility tree */
+  .sr-only-focusable:not(:focus):not(:focus-within) {
+    @apply sr-only;
+  }
+}

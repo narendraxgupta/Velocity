@@ -1,0 +1,235 @@
+// =============================================================================
+// Velocity — bot.proto
+//
+// gRPC API between the Bot Controller (singleton) and the Bot Workers (N).
+//
+// The controller fans out a benchmark plan to all available workers via a
+// bidirectional stream. Workers report back load-shedding signals, error
+// rates, and heartbeats. Either side can close the stream cleanly when the
+// benchmark window expires.
+// =============================================================================
+
+syntax = "proto3";
+
+package velocity.bot.v1;
+
+import "common.proto";
+
+option go_package        = "github.com/velocity/platform/proto/gen/go/bot/v1;botv1";
+option cc_enable_arenas  = true;
+option optimize_for      = SPEED;
+
+// ---------------------------------------------------------------------------
+// BotControl — the bidirectional RPC.
+//
+// Stream lifecycle:
+//   1. Worker dials Controller, sends `Hello` as first message.
+//   2. Controller replies with `LoadPlan`.
+//   3. Worker streams `StatusUpdate` every 200 ms.
+//   4. Controller may send `RampUpdate` mid-benchmark to adjust intensity.
+//   5. Either side sends `Shutdown` to end the run gracefully.
+// ---------------------------------------------------------------------------
+service BotControl {
+  rpc Control(stream WorkerToController) returns (stream ControllerToWorker);
+}
+
+// ---------------------------------------------------------------------------
+// Messages from worker to controller.
+// ---------------------------------------------------------------------------
+message WorkerToController {
+  oneof payload {
+    Hello        hello         = 1;
+    StatusUpdate status        = 2;
+    ErrorReport  error         = 3;
+    GoodbyeAck   goodbye_ack   = 4;
+  }
+}
+
+message Hello {
+  string worker_id           = 1;     // UUID — stable across restarts
+  string hostname            = 2;
+  uint32 cpu_count           = 3;     // Available cores for io_uring loops
+  uint64 mem_bytes           = 4;
+  string build_version       = 5;
+  repeated velocity.common.v1.BotPersona supported_personas = 6;
+  repeated velocity.common.v1.WireProtocol supported_protocols = 7;
+}
+
+message StatusUpdate {
+  string worker_id    = 1;
+  uint64 sent_total   = 2;     // Cumulative since `start_ts_ns`
+  uint64 acked_total  = 3;
+  uint64 errored_total = 4;
+  uint64 current_rps  = 5;     // Smoothed over last 1s
+  uint32 active_bots  = 6;
+  uint32 cpu_percent  = 7;     // 0..100, averaged across cores
+  uint32 mem_percent  = 8;
+  fixed64 sent_ts_ns  = 9;
+
+  // Kernel-side TCP latency, observed by the eBPF kprobe attached to
+  // tcp_sendmsg/tcp_recvmsg. When the probe could not load (build flag
+  // off, capability denied, kernel too old), these are zero — the
+  // controller treats zero as "no kernel data, render userspace only".
+  // The userspace bot already publishes its own HdrHistogram into the
+  // telemetry topic; the controller diffs the two to compute the
+  // "kernel vs userspace delta" series the frontend overlays on the
+  // latency chart. See worker/ebpf/latency_probe.bpf.c.
+  uint64 kernel_p50_ns  = 20;
+  uint64 kernel_p99_ns  = 21;
+  uint64 kernel_p999_ns = 22;
+  uint64 kernel_samples = 23;
+}
+
+message ErrorReport {
+  string worker_id     = 1;
+  ErrorKind kind       = 2;
+  string detail        = 3;
+  fixed64 occurred_ns  = 4;
+}
+
+enum ErrorKind {
+  ERROR_KIND_UNSPECIFIED       = 0;
+  ERROR_KIND_DNS_FAILURE       = 1;
+  ERROR_KIND_CONNECTION_REFUSED = 2;
+  ERROR_KIND_TLS_HANDSHAKE     = 3;
+  ERROR_KIND_PROTOCOL_VIOLATION = 4;
+  ERROR_KIND_INTERNAL          = 5;
+}
+
+message GoodbyeAck {
+  string worker_id = 1;
+  uint64 final_sent_total = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Messages from controller to worker.
+// ---------------------------------------------------------------------------
+message ControllerToWorker {
+  oneof payload {
+    LoadPlan    plan      = 1;
+    RampUpdate  ramp      = 2;
+    Shutdown    shutdown  = 3;
+    Heartbeat   heartbeat = 4;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// LoadPlan — the full benchmark recipe handed to a single worker.
+//
+// The controller divides the global plan across all healthy workers; each
+// worker receives a plan sized to its share of total target RPS.
+// ---------------------------------------------------------------------------
+message LoadPlan {
+  velocity.common.v1.SubmissionId submission_id = 1;
+  velocity.common.v1.Endpoint     target        = 2;
+
+  // Persona mix. Sum of weights does not need to equal 100; the worker
+  // normalizes them.
+  repeated PersonaWeight personas = 10;
+
+  // Ramp schedule — a sequence of {time, target_rps} waypoints. The worker
+  // linearly interpolates between consecutive waypoints. The last point
+  // determines the benchmark's natural end time.
+  repeated RampWaypoint schedule = 20;
+
+  // Constant-rate driver settings (Coordinated Omission correction). When
+  // true, the worker schedules sends at intended timestamps even if the
+  // submission slows down. This is the correct way to measure latency.
+  bool constant_rate = 30;
+
+  // Per-order timeout — orders not acked in this many microseconds are
+  // recorded as `OUTCOME_TIMEOUT`.
+  uint32 per_order_timeout_us = 40;
+
+  // RNG seed — making the workload deterministic per submission allows the
+  // correctness validator to replay against the exact same order stream.
+  fixed64 rng_seed = 50;
+
+  // Bots per reactor thread; total bot count = bots_per_reactor * cpu_count.
+  uint32 bots_per_reactor = 60;
+
+  // Trading symbol the bots transact in (e.g. "SPOT/USDT"). When the
+  // `venues` list is non-empty this is treated as the default symbol
+  // for backwards compatibility — the bots fan out across `venues`.
+  string symbol = 70;
+
+  // Fair value reference price, fixed-point. Personas use this as a
+  // midpoint anchor when `venues` is empty.
+  sint64 fair_value = 80;
+
+  // Minimum price increment, fixed-point.
+  sint64 tick_size = 90;
+
+  // Multi-venue fan-out. When this is non-empty, the bots partition
+  // themselves across the listed venues according to the weights, and
+  // each venue carries its own fair_value + tick_size (so SPOT, PERP
+  // and FUTURES can have realistic basis spreads). The controller's
+  // `cross-venue` profile populates this with three venues driven by
+  // correlated order flow — the trades on SPOT inform PERP basis,
+  // which informs FUTURES roll, etc. Empty list ⇒ legacy single-symbol
+  // behaviour using the top-level `symbol`/`fair_value`/`tick_size`.
+  repeated VenueSpec venues = 95;
+
+  // W3C trace context (`traceparent` header value). Set by the controller
+  // when the benchmark was started so worker telemetry can join the same
+  // trace as the originating REST request. Empty when no trace context
+  // was propagated (e.g. direct grpcurl). See docs/tracing.md.
+  string traceparent = 100;
+}
+
+message PersonaWeight {
+  velocity.common.v1.BotPersona persona = 1;
+  uint32                        weight  = 2;
+}
+
+// One leg of a multi-venue fan-out. The bot worker partitions its bots
+// across all listed venues, weighted by `weight`; each bot sticks with
+// one venue for the duration of the benchmark (so per-symbol resting
+// orders behave like real per-venue traders rather than churning).
+message VenueSpec {
+  // Logical venue id — "SPOT", "PERP", "FUTURES_DEC", etc.
+  string venue_id  = 1;
+  // Wire-level symbol on the target engine — "SPOT/USDT", "BTC-PERP".
+  string symbol    = 2;
+  // Routing weight; relative to other venues in the list. 100 = 100% of
+  // this venue's share. The controller normalises sums internally.
+  uint32 weight    = 3;
+  // Fair-value anchor for this leg, fixed-point. The controller drives a
+  // correlated stochastic process across legs (see ADR-007); each leg's
+  // own anchor is offset from the master mid to model basis spreads.
+  sint64 fair_value = 4;
+  // Minimum price increment, fixed-point.
+  sint64 tick_size = 5;
+  // Wire protocol for this leg. When unspecified, the LoadPlan's top-
+  // level target protocol is reused — most demos route every leg to the
+  // same gateway over REST so we don't multiply transports.
+  velocity.common.v1.WireProtocol protocol = 6;
+  // Optional explicit target endpoint override; when unset the worker
+  // sends every leg to the LoadPlan's top-level `target`. Used by the
+  // `cross-venue` profile when each leg lives in its own sandbox pod.
+  velocity.common.v1.Endpoint target = 7;
+}
+
+message RampWaypoint {
+  uint64 elapsed_ms  = 1;   // Since LoadPlan ack
+  uint64 target_rps  = 2;   // This worker's share
+}
+
+message RampUpdate {
+  // Replaces the remaining waypoints from `from_elapsed_ms` onward. Used to
+  // extend / shorten / spike a running benchmark without restarting workers.
+  uint64 from_elapsed_ms = 1;
+  repeated RampWaypoint waypoints = 2;
+}
+
+message Shutdown {
+  string reason = 1;
+  // If true, the worker drains in-flight requests before terminating.
+  // If false, it kills connections immediately.
+  bool drain = 2;
+  uint32 drain_timeout_ms = 3;
+}
+
+message Heartbeat {
+  fixed64 server_ts_ns = 1;
+}

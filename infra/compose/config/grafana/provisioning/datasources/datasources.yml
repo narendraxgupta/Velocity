@@ -1,0 +1,43 @@
+# =============================================================================
+#  Velocity — Grafana datasource provisioning
+#
+#  Grafana reads this file on startup and registers each datasource. Editing
+#  it inside Grafana itself is *not* the workflow — change YAML, restart
+#  Grafana, commit.
+# =============================================================================
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: "5s"
+
+  - name: QuestDB
+    type: postgres
+    access: proxy
+    url: questdb:8812
+    user: admin
+    secureJsonData:
+      password: quest
+    jsonData:
+      database: qdb
+      sslmode: disable
+      maxOpenConns: 4
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      postgresVersion: 1500
+      timescaledb: false
+
+  - name: Loki
+    type: loki
+    access: proxy
+    # Loki isn't in the default compose stack yet — Phase 2. Leaving the
+    # datasource defined so dashboards that reference it don't 404.
+    url: http://loki:3100
+    editable: true

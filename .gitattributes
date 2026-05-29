@@ -1,0 +1,72 @@
+# =============================================================================
+# Velocity — Git attributes
+#
+# Force LF line endings for everything that runs on Linux (most of the repo).
+# PowerShell scripts keep CRLF because Windows tooling expects it.
+# =============================================================================
+
+* text=auto eol=lf
+
+# Source
+*.c    text eol=lf
+*.cc   text eol=lf
+*.cpp  text eol=lf
+*.cxx  text eol=lf
+*.h    text eol=lf
+*.hh   text eol=lf
+*.hpp  text eol=lf
+*.hxx  text eol=lf
+*.ipp  text eol=lf
+*.inl  text eol=lf
+*.go   text eol=lf
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.js   text eol=lf
+*.jsx  text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.toml text eol=lf
+*.proto text eol=lf
+*.sh   text eol=lf
+*.md   text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+
+# Windows-only
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Binary blobs — never diffed
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.tar  binary
+*.tgz  binary
+*.so   binary
+*.dll  binary
+*.dylib binary
+*.exe  binary
+*.a    binary
+*.lib  binary
+*.o    binary
+*.obj  binary
+
+# Generated — exclude from language detection / diff stats
+proto/gen/** linguist-generated=true
+**/*.pb.h    linguist-generated=true
+**/*.pb.cc   linguist-generated=true
+**/*.pb.go   linguist-generated=true
+**/*.grpc.pb.* linguist-generated=true

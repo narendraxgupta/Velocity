@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: correctness-validator
+  namespace: velocity-control
+  labels: { app.kubernetes.io/name: correctness-validator }
+spec:
+  replicas: 2
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector: { matchLabels: { app.kubernetes.io/name: correctness-validator } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: correctness-validator }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "9096"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: validator
+          image: velocity/correctness-validator:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: metrics, containerPort: 9096 }]
+          env:
+            - { name: VELOCITY_REDPANDA_BROKERS, value: "redpanda.velocity-data.svc.cluster.local:9092" }
+            - { name: VELOCITY_KAFKA_GROUP_ID,   value: "velocity-validator" }
+            - { name: VELOCITY_TELEMETRY_TOPIC,  value: "telemetry.raw" }
+            - { name: VELOCITY_FILLS_TOPIC,      value: "telemetry.fills" }
+            # Required by main.cpp (env::required) — without it the validator
+            # aborts on startup. QuestDB lives in the data-plane namespace.
+            - { name: VELOCITY_QUESTDB_HOST,     value: "questdb.velocity-data.svc.cluster.local" }
+            - { name: VELOCITY_QUESTDB_ILP_PORT, value: "9009" }
+            - { name: VELOCITY_REDIS_ADDR,       value: "redis.velocity-data.svc.cluster.local:6379" }
+            - { name: VELOCITY_MISMATCHES_CAP,   value: "1000" }
+            - { name: VELOCITY_METRICS_PORT,     value: "9096" }
+          readinessProbe: { tcpSocket: { port: metrics }, periodSeconds: 5 }
+          resources:
+            requests: { cpu: 500m, memory: 1Gi  }
+            limits:   { cpu: 2,    memory: 4Gi  }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem:   true
+            capabilities: { drop: ["ALL"] }

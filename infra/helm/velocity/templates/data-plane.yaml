@@ -1,0 +1,193 @@
+{{/*
+  Minimal data-plane StatefulSets — Redis, Redpanda, QuestDB, MinIO.
+  Each is gated on its `mode: internal` value. For prod we strongly
+  recommend mode: external against your cloud provider's managed
+  offerings (Elasticache, MSK, RDS-shaped, S3) — these StatefulSets
+  are sized for evaluation, not for a 30-team IICPC final.
+*/}}
+
+{{- $dataNs := printf "%s-data" .Release.Name }}
+
+{{- if eq .Values.redis.mode "internal" }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-redis
+  namespace: {{ $dataNs }}
+  labels:
+    {{- include "velocity.commonLabels" . | nindent 4 }}
+    app.kubernetes.io/name: redis
+spec:
+  serviceName: {{ .Release.Name }}-redis
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: redis, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "velocity.selectorLabels" (list . "redis") | nindent 8 }}
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          ports:
+            - { name: redis, containerPort: 6379 }
+          args: ["redis-server", "--appendonly", "yes"]
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-redis
+  namespace: {{ $dataNs }}
+spec:
+  selector: { app.kubernetes.io/name: redis, app.kubernetes.io/instance: {{ .Release.Name }} }
+  ports:
+    - { name: redis, port: 6379, targetPort: redis }
+{{- end }}
+
+{{- if eq .Values.redpanda.mode "internal" }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-redpanda
+  namespace: {{ $dataNs }}
+  labels:
+    {{- include "velocity.commonLabels" . | nindent 4 }}
+    app.kubernetes.io/name: redpanda
+spec:
+  serviceName: {{ .Release.Name }}-redpanda
+  replicas: {{ .Values.redpanda.replicas }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: redpanda, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "velocity.selectorLabels" (list . "redpanda") | nindent 8 }}
+    spec:
+      containers:
+        - name: redpanda
+          image: {{ .Values.redpanda.image }}
+          args:
+            - redpanda
+            - start
+            - --overprovisioned
+            - --smp=1
+            - --memory=2G
+            - --reserve-memory=0M
+            - --node-id=0
+            - --check=false
+            - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+          ports:
+            - { name: kafka, containerPort: 9092 }
+          resources:
+            {{- toYaml .Values.redpanda.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-redpanda
+  namespace: {{ $dataNs }}
+spec:
+  selector: { app.kubernetes.io/name: redpanda, app.kubernetes.io/instance: {{ .Release.Name }} }
+  ports:
+    - { name: kafka, port: 9092, targetPort: kafka }
+{{- end }}
+
+{{- if eq .Values.questdb.mode "internal" }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-questdb
+  namespace: {{ $dataNs }}
+  labels:
+    {{- include "velocity.commonLabels" . | nindent 4 }}
+    app.kubernetes.io/name: questdb
+spec:
+  serviceName: {{ .Release.Name }}-questdb
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: questdb, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "velocity.selectorLabels" (list . "questdb") | nindent 8 }}
+    spec:
+      containers:
+        - name: questdb
+          image: {{ .Values.questdb.image }}
+          ports:
+            - { name: pg,   containerPort: 8812 }
+            - { name: ilp,  containerPort: 9009 }
+            - { name: http, containerPort: 9000 }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: {{ .Values.questdb.storageSize }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-questdb
+  namespace: {{ $dataNs }}
+spec:
+  clusterIP: None
+  selector: { app.kubernetes.io/name: questdb, app.kubernetes.io/instance: {{ .Release.Name }} }
+  ports:
+    - { name: pg,  port: 8812 }
+    - { name: ilp, port: 9009 }
+    - { name: http, port: 9000 }
+{{- end }}
+
+{{- if eq .Values.minio.mode "internal" }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-minio
+  namespace: {{ $dataNs }}
+  labels:
+    {{- include "velocity.commonLabels" . | nindent 4 }}
+    app.kubernetes.io/name: minio
+spec:
+  serviceName: {{ .Release.Name }}-minio
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: minio, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "velocity.selectorLabels" (list . "minio") | nindent 8 }}
+    spec:
+      containers:
+        - name: minio
+          image: {{ .Values.minio.image }}
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - { name: MINIO_ROOT_USER, value: "velocity" }
+            - { name: MINIO_ROOT_PASSWORD, value: "velocity-dev-secret" }
+          ports:
+            - { name: api,     containerPort: 9000 }
+            - { name: console, containerPort: 9001 }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: {{ .Values.minio.storageSize }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-minio
+  namespace: {{ $dataNs }}
+spec:
+  selector: { app.kubernetes.io/name: minio, app.kubernetes.io/instance: {{ .Release.Name }} }
+  ports:
+    - { name: api, port: 9000, targetPort: api }
+    - { name: console, port: 9001, targetPort: console }
+{{- end }}

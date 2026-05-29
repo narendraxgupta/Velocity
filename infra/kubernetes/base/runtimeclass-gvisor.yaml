@@ -1,0 +1,24 @@
+# =============================================================================
+#  Velocity — gVisor RuntimeClass
+#
+#  Every sandbox Pod sets `runtimeClassName: gvisor`. This RuntimeClass
+#  selects the `runsc` OCI handler that `containerd` ships with gVisor.
+#  See docs/adr/001-gvisor-over-firecracker.md.
+#
+#  Prerequisite: the gVisor binary (`runsc`) and the containerd config
+#  must be installed on every node. In production we manage this via
+#  a DaemonSet (Phase 2: infra/kubernetes/base/gvisor-installer.yaml).
+# =============================================================================
+
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc
+scheduling:
+  nodeSelector:
+    runtime.velocity.io/gvisor: "true"
+overhead:
+  podFixed:
+    cpu: 50m
+    memory: 16Mi

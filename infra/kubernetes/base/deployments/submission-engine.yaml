@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: submission-engine
+  namespace: velocity-control
+---
+# RBAC: the engine creates Jobs + Pods in `velocity-sandbox` and reads back.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: submission-engine-sandbox
+  namespace: velocity-sandbox
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/status", "pods/log"]
+    verbs:    ["create", "get", "list", "watch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs:    ["create", "get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: submission-engine-sandbox
+  namespace: velocity-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: submission-engine
+    namespace: velocity-control
+roleRef:
+  kind: Role
+  name: submission-engine-sandbox
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: submission-engine
+  namespace: velocity-control
+  labels:
+    app.kubernetes.io/name: submission-engine
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # single-writer of the in-memory registry
+  selector:
+    matchLabels: { app.kubernetes.io/name: submission-engine }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: submission-engine }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "9092"
+    spec:
+      serviceAccountName: submission-engine
+      automountServiceAccountToken: true   # needed for k8s client
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: engine
+          image: velocity/submission-engine:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: grpc,    containerPort: 7001 }
+            - { name: metrics, containerPort: 9092 }
+          env:
+            - { name: VELOCITY_GRPC_PORT,             value: "7001" }
+            - { name: VELOCITY_METRICS_PORT,          value: "9092" }
+            - { name: VELOCITY_REGISTRY_HOST,         value: "registry.velocity-data.svc.cluster.local:5000" }
+            - { name: VELOCITY_MINIO_ENDPOINT,        value: "minio.velocity-data.svc.cluster.local:9000" }
+            - { name: VELOCITY_MINIO_BUCKET,          value: "submissions" }
+            - { name: VELOCITY_MINIO_USE_TLS,         value: "false" }
+            - { name: VELOCITY_SANDBOX_NAMESPACE,     value: "velocity-sandbox" }
+            - { name: VELOCITY_SANDBOX_RUNTIME_CLASS, value: "gvisor" }
+            - name: VELOCITY_MINIO_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: minio-creds, key: access-key } }
+            - name: VELOCITY_MINIO_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: minio-creds, key: secret-key } }
+          readinessProbe:
+            grpc: { port: 7001 }
+            periodSeconds: 5
+          livenessProbe:
+            grpc: { port: 7001 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits:   { cpu: 1,    memory: 1Gi  }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem:   true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: submission-engine
+  namespace: velocity-control
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: submission-engine }
+  ports:
+    - { name: grpc,    port: 7001, targetPort: grpc }
+    - { name: metrics, port: 9092, targetPort: metrics }

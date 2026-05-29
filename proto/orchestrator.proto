@@ -1,0 +1,566 @@
+// =============================================================================
+// Velocity — orchestrator.proto
+//
+// The control-plane RPC API. The API Gateway (HTTP-facing, submitter-facing)
+// translates user actions into gRPC calls against:
+//
+//   * SubmissionService   — owned by the Submission Engine (Go)
+//   * BenchmarkService    — owned by the Bot Controller (C++)
+//
+// Everything here is request/response except `WatchBenchmark`, which is a
+// server-streaming RPC used by the API Gateway to forward live state to
+// browser WebSocket clients.
+// =============================================================================
+
+syntax = "proto3";
+
+package velocity.orchestrator.v1;
+
+import "common.proto";
+
+option go_package        = "github.com/velocity/platform/proto/gen/go/orchestrator/v1;orchestratorv1";
+option cc_enable_arenas  = true;
+option optimize_for      = SPEED;
+
+// ===========================================================================
+//                               SubmissionService
+// ===========================================================================
+
+service SubmissionService {
+  // Stream artefact bytes into object storage. First message carries the
+  // metadata header; subsequent messages carry binary chunks. The server
+  // computes the SHA-256 and writes the artefact to MinIO under
+  // submissions/<submission_id>/<filename>.
+  rpc Upload(stream UploadRequest) returns (UploadResponse);
+
+  // Register a new submission — uploaded artefact is already in object
+  // storage; this just registers the metadata and queues a build.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Build the submission's container image. Returns immediately; the build
+  // proceeds asynchronously and emits status events.
+  rpc Build(BuildRequest) returns (BuildResponse);
+
+  // Deploy the (already-built) submission into a sandboxed pod and wait for
+  // health. Returns the endpoint to point bots at.
+  rpc Deploy(DeployRequest) returns (DeployResponse);
+
+  // Tear down the sandbox pod. Idempotent.
+  rpc Teardown(TeardownRequest) returns (TeardownResponse);
+
+  // Stream lifecycle status updates for a submission (Build/Deploy progress,
+  // health probe failures, OOM kills, etc.).
+  rpc WatchSubmission(WatchSubmissionRequest) returns (stream SubmissionStatus);
+
+  // Fetch the most recent CPU flamegraph artefact for a submission. Behind
+  // the scenes the engine reads `flamegraphs/<submission_id>.folded.txt`
+  // from MinIO — written by the perf-profiler sidecar attached to the
+  // sandbox pod when EnableProfiler was set on Deploy. Returns
+  // NOT_FOUND if no flamegraph has been recorded for this submission yet.
+  rpc GetFlamegraph(GetFlamegraphRequest) returns (GetFlamegraphResponse);
+}
+
+message GetFlamegraphRequest {
+  velocity.common.v1.SubmissionId submission_id = 1;
+}
+
+message GetFlamegraphResponse {
+  // Brendan Gregg's folded-stack format, one stack per line:
+  //   `top;mid;bot 42`
+  // Suitable as direct input to d3-flamegraph / inferno-flamegraph.
+  string folded         = 1;
+  // Wall-clock nanoseconds when the perf data was captured.
+  fixed64 recorded_at_ns = 2;
+  // Per-sample period used by perf record (Hz). 99 by default.
+  uint32 sample_freq_hz  = 3;
+  // Total CPU-seconds covered by the recording.
+  uint64 duration_seconds = 4;
+}
+
+message UploadRequest {
+  oneof payload {
+    UploadHeader header = 1;
+    UploadChunk  chunk  = 2;
+  }
+}
+
+message UploadHeader {
+  string       filename     = 1;
+  ArtefactKind kind         = 2;
+  uint64       total_bytes  = 3;     // best-effort; client can stream of unknown size
+  string       display_name = 4;
+  string       team_name    = 5;
+}
+
+message UploadChunk {
+  bytes data = 1;
+}
+
+message UploadResponse {
+  string artefact_object_key = 1;
+  string sha256              = 2;
+  uint64 received_bytes      = 3;
+}
+
+message RegisterRequest {
+  string display_name      = 1;
+  string team_name         = 2;
+  string artefact_object_key = 3;  // Pointer into MinIO/S3
+  string artefact_sha256   = 4;
+  ArtefactKind kind        = 5;
+  string entrypoint_hint   = 6;    // e.g. "Dockerfile" or "main.cpp"
+}
+
+enum ArtefactKind {
+  ARTEFACT_KIND_UNSPECIFIED = 0;
+  ARTEFACT_KIND_DOCKERFILE  = 1;
+  ARTEFACT_KIND_SOURCE_TAR  = 2;
+  ARTEFACT_KIND_BINARY      = 3;
+  ARTEFACT_KIND_OCI_IMAGE   = 4;
+  // PCAP replay: artefact is a .pcap (or .pcap.gz) file produced by the
+  // velocity-recorder sidecar during an earlier benchmark. Submissions of
+  // this kind don't build a container — they're handed to the
+  // velocity-replayer service which re-fires the captured byte stream at
+  // a deployed target. Useful for (a) bug bisect (replay v1's traffic
+  // against v2's engine) and (b) production replay (capture real-venue
+  // packets, replay deterministically against a candidate engine).
+  ARTEFACT_KIND_PCAP_REPLAY = 5;
+}
+
+message RegisterResponse {
+  velocity.common.v1.SubmissionId submission_id = 1;
+}
+
+message BuildRequest {
+  velocity.common.v1.SubmissionId submission_id = 1;
+}
+
+message BuildResponse {
+  string image_ref = 1;  // e.g. "registry.local:5000/velocity/01HQ8K..."
+}
+
+message DeployRequest {
+  velocity.common.v1.SubmissionId submission_id = 1;
+  // Resource constraints applied via cgroups v2 / K8s ResourceRequirements.
+  ResourceLimits limits = 2;
+}
+
+message ResourceLimits {
+  // Number of dedicated cores (CPU pinning via cpu-manager-policy=static).
+  uint32 cpu_cores      = 1;
+  // Hard memory limit in bytes. OOMKill if exceeded.
+  uint64 mem_bytes      = 2;
+  // Per-pod ephemeral storage cap.
+  uint64 ephemeral_bytes = 3;
+  // Maximum wall-clock seconds the pod may stay up — defense in depth.
+  uint32 lifetime_seconds = 4;
+}
+
+message DeployResponse {
+  velocity.common.v1.Endpoint endpoint = 1;
+  string pod_name = 2;
+  string namespace = 3;
+}
+
+message TeardownRequest {
+  velocity.common.v1.SubmissionId submission_id = 1;
+  bool force = 2;  // Skip graceful shutdown
+}
+
+message TeardownResponse {
+  bool teardown_complete = 1;
+}
+
+message WatchSubmissionRequest {
+  velocity.common.v1.SubmissionId submission_id = 1;
+}
+
+message SubmissionStatus {
+  velocity.common.v1.SubmissionId submission_id = 1;
+  SubmissionPhase phase = 2;
+  string detail = 3;
+  fixed64 ts_ns = 4;
+}
+
+enum SubmissionPhase {
+  SUBMISSION_PHASE_UNSPECIFIED = 0;
+  SUBMISSION_PHASE_REGISTERED  = 1;
+  SUBMISSION_PHASE_BUILDING    = 2;
+  SUBMISSION_PHASE_BUILT       = 3;
+  SUBMISSION_PHASE_DEPLOYING   = 4;
+  SUBMISSION_PHASE_HEALTHY     = 5;
+  SUBMISSION_PHASE_UNHEALTHY   = 6;
+  SUBMISSION_PHASE_TEARDOWN    = 7;
+  SUBMISSION_PHASE_TERMINATED  = 8;
+  SUBMISSION_PHASE_BUILD_FAILED = 9;
+  SUBMISSION_PHASE_OOM_KILLED   = 10;
+  SUBMISSION_PHASE_CRASHED      = 11;
+}
+
+// ===========================================================================
+//                               BenchmarkService
+// ===========================================================================
+
+service BenchmarkService {
+  // Begin a benchmark against an already-deployed submission. Returns a
+  // benchmark id that can be used to watch / cancel.
+  rpc StartBenchmark(StartBenchmarkRequest) returns (StartBenchmarkResponse);
+
+  // Cancel an in-flight benchmark. Idempotent.
+  rpc CancelBenchmark(CancelBenchmarkRequest) returns (CancelBenchmarkResponse);
+
+  // Stream live benchmark state — current TPS, percentile latencies, error
+  // counts. The frontend's per-submission detail view subscribes to this via
+  // the API Gateway.
+  rpc WatchBenchmark(WatchBenchmarkRequest) returns (stream BenchmarkSnapshot);
+
+  // Return the final report once a benchmark has terminated.
+  rpc GetReport(GetReportRequest) returns (BenchmarkReport);
+}
+
+message StartBenchmarkRequest {
+  velocity.common.v1.SubmissionId submission_id = 1;
+  // Named profile from infra/profiles/*.yaml — e.g. "baseline", "spike", "fire-hose".
+  string profile_name = 2;
+  // Optional override: ignore profile defaults and use these.
+  BenchmarkProfile override = 3;
+}
+
+message BenchmarkProfile {
+  uint64 target_rps         = 1;
+  uint32 duration_seconds   = 2;
+  uint32 ramp_seconds       = 3;
+  uint32 hold_seconds       = 4;
+  // Persona mix — see common.proto / bot.proto.
+  repeated PersonaShare personas = 10;
+  // Per-order timeout in microseconds.
+  uint32 per_order_timeout_us = 20;
+
+  // Optional custom ramp schedule. When present, overrides the simple
+  // `ramp_seconds → target_rps → hold_seconds` shape and lets a profile
+  // define an arbitrary staircase. Used by the `cliff-finder` profile to
+  // do an exponential RPS ramp that doubles every two seconds, so the
+  // cliff detector can isolate exactly where the engine starts shedding.
+  // Each waypoint is `(elapsed_ms, target_rps)`; values are interpolated
+  // by the bot worker just like the auto-generated schedule.
+  repeated CustomRampWaypoint custom_schedule = 30;
+
+  // Cliff-finder marker. When true, the controller treats sustained-rps
+  // tracking as cliff-search instead of steady-state load. No effect on
+  // the wire format — pure dispatch flag for the report builder.
+  bool cliff_finder = 31;
+
+  // Multi-venue fan-out. When non-empty, the controller spawns a bot
+  // worker share per `VenueLeg`, drives them with correlated order
+  // flow (Phase 2.5's OU process is used as the master mid for all
+  // legs), and surfaces a cross-venue latency-skew metric in the final
+  // report. Empty list ⇒ legacy single-symbol benchmark.
+  repeated VenueLeg venues = 40;
+}
+
+// VenueLeg is the orchestrator-side description of one fan-out target.
+// The controller uses it to:
+//   1. Build per-leg LoadPlans for the bot fleet, mapping each leg to
+//      VenueSpec entries on the wire.
+//   2. Track per-venue p99 latency separately so the report can compute
+//      cross-venue *skew* = max(p99_venue_i) - min(p99_venue_i). Skew is
+//      what HFT firms actually monitor: a single venue lagging by 50µs
+//      while others run at 10µs is a hard signal of capacity contention
+//      on that leg.
+message VenueLeg {
+  // Logical venue id — "SPOT", "PERP", "FUTURES_DEC"; used as the row
+  // key in per-venue metrics tables.
+  string venue_id   = 1;
+  // Wire-level symbol on the target engine.
+  string symbol     = 2;
+  // Routing weight, relative to other legs (controller normalises).
+  uint32 weight     = 3;
+  // Fair-value anchor in fixed-point. Acts as the basis offset relative
+  // to the master mid driven by the controller's stochastic generator.
+  sint64 fair_value = 4;
+  // Minimum price increment, fixed-point.
+  sint64 tick_size  = 5;
+  // Optional submission_id of the sandbox handling this leg. When set,
+  // the controller resolves its endpoint through the registry just like
+  // a single-venue StartBenchmark; when unset, the leg shares the
+  // primary submission's endpoint.
+  velocity.common.v1.SubmissionId submission_id = 6;
+}
+
+message CustomRampWaypoint {
+  uint64 elapsed_ms = 1;
+  uint64 target_rps = 2;
+}
+
+message PersonaShare {
+  velocity.common.v1.BotPersona persona = 1;
+  uint32 weight                         = 2;
+}
+
+message StartBenchmarkResponse {
+  string benchmark_id = 1;
+  fixed64 started_at_ns = 2;
+}
+
+message CancelBenchmarkRequest {
+  string benchmark_id = 1;
+  string reason       = 2;
+}
+
+message CancelBenchmarkResponse {
+  bool cancelled = 1;
+}
+
+message WatchBenchmarkRequest {
+  string benchmark_id = 1;
+}
+
+message BenchmarkSnapshot {
+  string benchmark_id = 1;
+  fixed64 ts_ns       = 2;
+  uint64 elapsed_ms   = 3;
+  BenchmarkPhase phase = 4;
+
+  // Live metrics (re-published every ~250 ms).
+  uint64 sent_total   = 10;
+  uint64 acked_total  = 11;
+  uint64 errored_total = 12;
+  uint64 current_rps  = 13;
+  uint64 target_rps   = 14;
+  uint64 p50_latency_ns = 15;
+  uint64 p90_latency_ns = 16;
+  uint64 p99_latency_ns = 17;
+  uint64 p999_latency_ns = 18;
+  uint64 max_latency_ns = 19;
+
+  double correctness_score = 20;
+  double composite_score   = 21;
+
+  // Sub-scores surfaced so the frontend score-breakdown modal can render the
+  // exact formula with substituted values (rather than back-solving from the
+  // composite). All three are in [0, 100]; penalty is in [0, 50] per the
+  // scorer's compute_penalty() cap.
+  double throughput_score = 22;
+  double latency_score    = 23;
+  double penalty_score    = 24;
+
+  // W3C trace_id (32-hex chars) for the root span the controller created on
+  // StartBenchmark. The frontend surfaces this as a "Open in Jaeger" link on
+  // the submission detail page so judges can walk the full waterfall:
+  // gateway → controller → 100 bot workers → validator → scoring.
+  string trace_id = 25;
+
+  // Kernel-side latency observed by the eBPF probe in the bot worker
+  // (see worker/ebpf/latency_probe.bpf.c). Aggregated across all
+  // reporting workers — controller takes the max-pooled p99 across
+  // workers so a single noisy NIC dominates the result. Zero means
+  // "no kernel data" (probe disabled, kernel too old, or no samples
+  // observed in this window); the frontend hides the kernel series
+  // when both p50 and p99 are zero.
+  uint64 kernel_p50_latency_ns  = 26;
+  uint64 kernel_p99_latency_ns  = 27;
+  uint64 kernel_p999_latency_ns = 28;
+  uint64 kernel_samples_observed = 29;
+}
+
+enum BenchmarkPhase {
+  BENCHMARK_PHASE_UNSPECIFIED = 0;
+  BENCHMARK_PHASE_QUEUED      = 1;
+  BENCHMARK_PHASE_RAMPING     = 2;
+  BENCHMARK_PHASE_HOLDING     = 3;
+  BENCHMARK_PHASE_DRAINING    = 4;
+  BENCHMARK_PHASE_COMPLETE    = 5;
+  BENCHMARK_PHASE_CANCELLED   = 6;
+  BENCHMARK_PHASE_FAILED      = 7;
+}
+
+message GetReportRequest {
+  string benchmark_id = 1;
+}
+
+message BenchmarkReport {
+  string benchmark_id = 1;
+  velocity.common.v1.SubmissionId submission_id = 2;
+  BenchmarkProfile profile = 3;
+
+  fixed64 started_at_ns  = 10;
+  fixed64 finished_at_ns = 11;
+
+  uint64 total_orders   = 20;
+  uint64 total_acked    = 21;
+  uint64 total_errored  = 22;
+  uint64 total_timeouts = 23;
+
+  uint64 peak_rps_observed = 30;
+  uint64 sustained_rps     = 31;
+
+  uint64 p50_ns  = 40;
+  uint64 p90_ns  = 41;
+  uint64 p99_ns  = 42;
+  uint64 p999_ns = 43;
+  uint64 max_ns  = 44;
+
+  double throughput_score  = 50;
+  double latency_score     = 51;
+  double correctness_score = 52;
+  double composite_score   = 53;
+
+  // Penalty breakdown.
+  repeated Penalty penalties = 60;
+
+  // W3C trace_id (32-hex chars) of the benchmark's root span. Same value as
+  // BenchmarkSnapshot.trace_id; surfaced here so the final-report page can
+  // also render a Jaeger deep-link.
+  string trace_id = 70;
+
+  // Throughput-cliff detector result. Populated only when the profile is
+  // `cliff-finder` (or any profile with cliff_finder=true). The cliff RPS is
+  // the offered rate at which the engine first failed to sustain — defined as
+  // the first ≥750ms window where (observed_rps / intended_rps) < 0.80 OR
+  // p99_latency exceeded 10× the early-ramp baseline p99. The CI bounds use
+  // the intended_rps span across that breaking window (lower = start, upper
+  // = end). When no cliff was observed within the run, cliff_detected=false.
+  bool   cliff_detected   = 80;
+  uint64 cliff_rps        = 81;
+  uint64 cliff_lower_rps  = 82;
+  uint64 cliff_upper_rps  = 83;
+  // Confidence as a fraction in [0,1] — derived from the number of consecutive
+  // breaking samples (more samples → tighter CI → higher confidence).
+  double cliff_confidence = 84;
+  // Human-readable reason: "throughput_shed" or "tail_latency_blowup".
+  string cliff_reason     = 85;
+
+  // Per-venue breakdown when the profile fanned out to multiple legs.
+  // Empty in single-symbol benchmarks. Used by the frontend to render
+  // a per-venue table on the submission detail page.
+  repeated VenueResult venue_results = 90;
+
+  // Cross-venue latency skew = max(p99_venue) - min(p99_venue) across
+  // all reporting legs. Zero in single-symbol runs.
+  uint64 cross_venue_skew_ns = 91;
+}
+
+message VenueResult {
+  string venue_id    = 1;
+  string symbol      = 2;
+  uint64 sent_total  = 3;
+  uint64 acked_total = 4;
+  uint64 p50_ns      = 5;
+  uint64 p99_ns      = 6;
+  uint64 p999_ns     = 7;
+}
+
+message Penalty {
+  string name   = 1;   // e.g. "oom-killed", "missing-fills"
+  double points = 2;   // Positive = subtracted from composite.
+  string detail = 3;
+}
+
+// ===========================================================================
+//                               PcapService
+// ===========================================================================
+//
+// Companion to BenchmarkService. Lives in the velocity-replayer container and
+// is invoked by the API gateway when a user uploads an ARTEFACT_KIND_PCAP_REPLAY
+// submission. The recorder side is a passive sidecar — it writes
+// `pcaps/<benchmark_id>.pcap` to MinIO during every normal run and is not RPC
+// addressable. The replayer is the active half: it pulls a pcap from MinIO,
+// parses out the per-flow application-layer payload, and re-fires the byte
+// stream against a freshly-deployed engine endpoint.
+service PcapService {
+  // List pcaps available for replay. Backed by a `pcaps/` prefix scan in
+  // MinIO. Used by the frontend's "Upload .pcap" picker.
+  rpc ListPcaps(ListPcapsRequest) returns (ListPcapsResponse);
+
+  // Begin a replay run. The replayer:
+  //   1. Fetches `pcaps/<source_benchmark_id>.pcap` from MinIO.
+  //   2. Reassembles each TCP flow whose dst port matches the target endpoint.
+  //   3. Either preserves original inter-packet gaps (clock_mode=PRESERVE)
+  //      or fires at a fixed effective RPS (clock_mode=FIXED_RPS).
+  //   4. Streams per-packet send/ack timing into the same telemetry bus the
+  //      bot fleet uses — so the scoring service can grade the replay run
+  //      using the existing HdrHistogram pipeline.
+  rpc StartReplay(StartReplayRequest) returns (StartReplayResponse);
+
+  // Stream replay progress. Same shape as BenchmarkSnapshot for parity with
+  // the regular benchmark watch path on the frontend.
+  rpc WatchReplay(WatchReplayRequest) returns (stream BenchmarkSnapshot);
+
+  // Look up the MinIO object key of a recorded pcap for a given benchmark.
+  // The gateway uses this to mint a presigned download URL.
+  rpc GetPcapObjectKey(GetPcapObjectKeyRequest) returns (GetPcapObjectKeyResponse);
+}
+
+message ListPcapsRequest {
+  // Optional filter; empty = "all available pcaps".
+  string team_name = 1;
+  uint32 limit     = 2;  // 0 = server default (50)
+}
+
+message ListPcapsResponse {
+  repeated PcapDescriptor pcaps = 1;
+}
+
+message PcapDescriptor {
+  string  benchmark_id     = 1;
+  velocity.common.v1.SubmissionId source_submission_id = 2;
+  string  team_name        = 3;
+  fixed64 recorded_at_ns   = 4;
+  uint64  packet_count     = 5;
+  uint64  total_bytes      = 6;
+  // MinIO object key — used as the input to StartReplay.
+  string  object_key       = 7;
+}
+
+message StartReplayRequest {
+  // The submission to fire the replay at. Must be deployed + healthy.
+  velocity.common.v1.SubmissionId target_submission_id = 1;
+  // The pcap to replay. Either an object_key (from ListPcaps) or a freshly
+  // uploaded one (artefact_object_key from Upload+Register with kind
+  // ARTEFACT_KIND_PCAP_REPLAY).
+  string source_object_key = 2;
+  // Pacing strategy for the replay.
+  PcapClockMode clock_mode = 3;
+  // When clock_mode=FIXED_RPS, the effective RPS to fire at.
+  uint64 fixed_rps = 4;
+  // When clock_mode=PRESERVE, an optional speed multiplier applied to the
+  // original inter-packet gaps (1.0 = real time, 2.0 = 2× faster, 0.5 = half
+  // speed). Default 1.0.
+  double speed_multiplier = 5;
+}
+
+enum PcapClockMode {
+  PCAP_CLOCK_MODE_UNSPECIFIED = 0;
+  // Re-fire each packet at its original wall-clock offset relative to the
+  // first packet in the capture. Most faithful to the original behaviour and
+  // the right choice for bug-bisect workflows.
+  PCAP_CLOCK_MODE_PRESERVE    = 1;
+  // Ignore inter-packet gaps and fire at a fixed effective RPS. Useful when
+  // the original run was slow and the target engine needs to be load-tested
+  // at higher rates than the source.
+  PCAP_CLOCK_MODE_FIXED_RPS   = 2;
+}
+
+message StartReplayResponse {
+  // Replay runs share the BenchmarkSnapshot / leaderboard surface, so we
+  // mint a benchmark_id the same way StartBenchmark does.
+  string benchmark_id = 1;
+  fixed64 started_at_ns = 2;
+  uint64 expected_packets = 3;
+}
+
+message WatchReplayRequest {
+  string benchmark_id = 1;
+}
+
+message GetPcapObjectKeyRequest {
+  string benchmark_id = 1;
+}
+
+message GetPcapObjectKeyResponse {
+  string object_key = 1;
+  uint64 size_bytes = 2;
+  // Whether the recorder actually produced a non-trivial capture — false
+  // means the recorder sidecar never ran (chaos-killed, OOM, etc).
+  bool available = 3;
+}
