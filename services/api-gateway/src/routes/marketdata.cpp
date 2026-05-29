@@ -148,16 +148,22 @@ public:
                 auto last_hb = std::make_shared<std::chrono::steady_clock::time_point>(
                     std::chrono::steady_clock::now());
 
-                auto tick = [stream, running, last_hb]() {
+                // ResponseStreamPtr is a std::unique_ptr, which can't be
+                // captured by copy into the runEvery() std::function. Promote
+                // it to a shared_ptr so the repeating timer callback can own it.
+                auto stream_sp =
+                    std::shared_ptr<drogon::ResponseStream>(std::move(stream));
+
+                auto tick = [stream_sp, running, last_hb]() {
                     if (!*running) return;
                     auto* r = clients::RedisClient::get();
-                    if (!r) { stream->close(); *running = false; return; }
+                    if (!r) { stream_sp->close(); *running = false; return; }
                     try {
                         const auto body = build_snapshot(*r).dump();
                         const auto msg = "event: snapshot\ndata: " + body + "\n\n";
-                        if (!stream->send(msg)) {
+                        if (!stream_sp->send(msg)) {
                             *running = false;
-                            stream->close();
+                            stream_sp->close();
                             return;
                         }
                     } catch (...) {
@@ -166,7 +172,7 @@ public:
                     }
                     const auto now = std::chrono::steady_clock::now();
                     if (now - *last_hb > std::chrono::seconds(10)) {
-                        stream->send(": heartbeat\n\n");
+                        stream_sp->send(": heartbeat\n\n");
                         *last_hb = now;
                     }
                 };
