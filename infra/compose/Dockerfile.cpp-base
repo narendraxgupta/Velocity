@@ -69,5 +69,13 @@ COPY proto/ ./proto/
 COPY services/ ./services/
 COPY scripts/sample-exchange/ ./scripts/sample-exchange/
 
-RUN cmake --preset conan-release \
+# Re-run conan install now that the full source (incl. CMakeLists.txt) is present
+# so it writes CMakeUserPresets.json into the source root. All packages are
+# already compiled and cached in the deps layer, so this does no rebuilding —
+# it only regenerates the toolchain/presets — then we configure and build.
+RUN conan install . --build=missing \
+        -s build_type=Release \
+        -s compiler.cppstd=20 \
+        -s compiler.libcxx=libstdc++11 \
+ && cmake --preset conan-release \
  && cmake --build --preset conan-release --parallel
