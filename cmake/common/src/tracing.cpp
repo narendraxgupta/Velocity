@@ -69,7 +69,8 @@ auto hex_to_bytes(std::string_view hex, std::array<std::uint8_t, N>& out) -> boo
 
 auto now_unix_ns() -> std::uint64_t {
     using namespace std::chrono;
-    return duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
+    return static_cast<std::uint64_t>(
+        duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count());
 }
 
 // CSPRNG. Tries /dev/urandom first (cheap, blocking-free), then a
@@ -210,7 +211,8 @@ private:
                 cv_.wait_for(lock, kFlushEvery, [this] {
                     return queue_.size() >= kBatchSize || !running_.load();
                 });
-                const auto take = std::min(queue_.size(), kBatchSize);
+                const auto take =
+                    static_cast<std::ptrdiff_t>(std::min(queue_.size(), kBatchSize));
                 batch.insert(batch.end(),
                              std::make_move_iterator(queue_.begin()),
                              std::make_move_iterator(queue_.begin() + take));
