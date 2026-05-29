@@ -8,7 +8,10 @@
 #include "correctness_validator/reference_orderbook.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <iterator>
 #include <random>
+#include <unordered_map>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -212,7 +215,9 @@ TEST(ReferenceOrderbook, CancelMidLevelPreservesTimePriority) {
 
 // ----------------------- Property tests ------------------------------------
 
-// Property: at any moment, sum of resting bid quantities == bid_depth().
+// Property: after an arbitrary stream of submits/cancels, a faithful shadow
+// model of the book agrees with it on the number of resting orders, and the
+// top-of-book stays within sane bounds.
 TEST(ReferenceOrderbook, BookInvariantsHoldUnderRandomOps) {
     ReferenceOrderbook b;
     std::mt19937 rng{42};
@@ -221,21 +226,22 @@ TEST(ReferenceOrderbook, BookInvariantsHoldUnderRandomOps) {
     std::uniform_int_distribution<long> qty_dist(1, 20);
     std::uniform_int_distribution<int>  op_dist(0, 9);   // 0..7 submit, 8..9 cancel
 
-    std::vector<std::uint64_t> live;
+    // Shadow model of the book: id -> remaining resting quantity. An id is
+    // present here iff that order is currently resting in `b`. We mirror every
+    // mutation the book makes: an aggressor consumes resting makers (decrement,
+    // and erase once fully consumed), and a limit remainder is added only when
+    // the book reports it actually rested.
+    std::unordered_map<std::uint64_t, std::uint64_t> resting;
     std::uint64_t next_id = 1;
-    long bid_total = 0, ask_total = 0;
 
     for (int i = 0; i < 5'000; ++i) {
-        if (op_dist(rng) >= 8 && !live.empty()) {
-            // Cancel a random live id.
-            std::uniform_int_distribution<std::size_t> idx_dist(0, live.size() - 1);
-            const auto k  = idx_dist(rng);
-            const auto id = live[k];
-            (void)b.cancel(id);
-            // Note: we can't easily mirror the qty here without tracking
-            // each order; we rely on the invariant check at the end.
-            std::swap(live[k], live.back());
-            live.pop_back();
+        if (op_dist(rng) >= 8 && !resting.empty()) {
+            // Cancel a random currently-resting id.
+            std::uniform_int_distribution<std::size_t> idx_dist(0, resting.size() - 1);
+            auto it = resting.begin();
+            std::advance(it, static_cast<std::ptrdiff_t>(idx_dist(rng)));
+            EXPECT_TRUE(b.cancel(it->first));
+            resting.erase(it);
             continue;
         }
 
@@ -244,14 +250,25 @@ TEST(ReferenceOrderbook, BookInvariantsHoldUnderRandomOps) {
         const auto qty = static_cast<std::uint64_t>(qty_dist(rng));
         const auto id  = next_id++;
         const auto r   = b.submit(make_limit(id, s, px, qty));
-        if (r.rested) live.push_back(id);
-        // Quantity bookkeeping is implicitly verified by the
-        // resting_order_count and depth invariants below.
-        (void)bid_total; (void)ask_total;
+
+        // Each fill consumes quantity from a resting maker. A maker that is
+        // fully consumed leaves the book, so drop it from the shadow too.
+        for (const auto& f : r.fills) {
+            const auto mit = resting.find(f.maker_id);
+            ASSERT_NE(mit, resting.end())
+                << "fill against maker " << f.maker_id
+                << " that the shadow model does not have resting";
+            ASSERT_GE(mit->second, f.quantity);
+            mit->second -= f.quantity;
+            if (mit->second == 0) resting.erase(mit);
+        }
+
+        // The aggressor's remainder rests iff the book says so.
+        if (r.rested) resting[id] = r.remaining_quantity;
     }
 
-    // Final invariants.
-    EXPECT_EQ(b.resting_order_count(), live.size());
+    // Final invariants: the shadow and the book agree on resting order count.
+    EXPECT_EQ(b.resting_order_count(), resting.size());
     if (b.best_bid().has_value()) {
         EXPECT_GE(*b.best_bid(), 990);
         EXPECT_LE(*b.best_bid(), 1010);
