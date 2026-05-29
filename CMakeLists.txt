@@ -98,6 +98,16 @@ velocity_add_proto_library(
         ${CMAKE_SOURCE_DIR}/proto
 )
 
+# ---- Tests setup ------------------------------------------------------------
+# Must run BEFORE the add_subdirectory() calls below so the test subdirectories
+# can use the GTest::* targets and the gtest_discover_tests() command that
+# include(GoogleTest) provides.
+if(VELOCITY_BUILD_TESTS)
+    enable_testing()
+    find_package(GTest CONFIG REQUIRED)
+    include(GoogleTest)
+endif()
+
 # ---- Common library (used by every service) ---------------------------------
 add_subdirectory(cmake/common)        # libvelocity_common: logging, time, config
 
@@ -112,13 +122,6 @@ add_subdirectory(services/scoring-service)
 
 # ---- Reference exchange (used in CI to validate the platform) ---------------
 add_subdirectory(scripts/sample-exchange)
-
-# ---- Tests ------------------------------------------------------------------
-if(VELOCITY_BUILD_TESTS)
-    enable_testing()
-    find_package(GTest CONFIG REQUIRED)
-    include(GoogleTest)
-endif()
 
 # ---- Summary ----------------------------------------------------------------
 message(STATUS "")
