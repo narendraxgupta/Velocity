@@ -61,7 +61,9 @@ class VelocityRecipe(ConanFile):
 
         # Concurrency / data structures (Boost.Intrusive for the orderbook;
         # Boost.Asio used by Drogon and friends; Boost.LockFree for SPSC).
-        self.requires("boost/1.86.0")
+        # Pinned to 1.83.0 to match drogon/1.9.6's pin (the components we use are
+        # stable across these minors); avoids a boost version conflict.
+        self.requires("boost/1.83.0")
 
         # Networking — only the API gateway uses Drogon
         self.requires("drogon/1.9.6")
