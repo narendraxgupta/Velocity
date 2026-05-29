@@ -10,7 +10,7 @@ services:
   api-gateway:
     image: velocity/api-gateway:dev
     build:
-      context: ..
+      context: ../..
       dockerfile: services/api-gateway/Dockerfile
       target: runtime
     container_name: velocity-api-gateway
@@ -39,7 +39,7 @@ services:
   submission-engine:
     image: velocity/submission-engine:dev
     build:
-      context: ..
+      context: ../..
       dockerfile: services/submission-engine/Dockerfile
       target: runtime
     container_name: velocity-submission-engine
@@ -65,7 +65,7 @@ services:
   bot-controller:
     image: velocity/bot-controller:dev
     build:
-      context: ..
+      context: ../..
       dockerfile: services/bot-fleet/controller/Dockerfile
       target: runtime
     container_name: velocity-bot-controller
@@ -85,7 +85,7 @@ services:
   bot-worker:
     image: velocity/bot-worker:dev
     build:
-      context: ..
+      context: ../..
       dockerfile: services/bot-fleet/worker/Dockerfile
       target: runtime
     profiles: [apps]
@@ -114,7 +114,7 @@ services:
   telemetry-ingester:
     image: velocity/telemetry-ingester:dev
     build:
-      context: ..
+      context: ../..
       dockerfile: services/telemetry-ingester/Dockerfile
       target: runtime
     container_name: velocity-telemetry-ingester
@@ -134,7 +134,7 @@ services:
   correctness-validator:
     image: velocity/correctness-validator:dev
     build:
-      context: ..
+      context: ../..
       dockerfile: services/correctness-validator/Dockerfile
       target: runtime
     container_name: velocity-correctness-validator
@@ -152,7 +152,7 @@ services:
   scoring-service:
     image: velocity/scoring-service:dev
     build:
-      context: ..
+      context: ../..
       dockerfile: services/scoring-service/Dockerfile
       target: runtime
     container_name: velocity-scoring-service
@@ -174,7 +174,7 @@ services:
   leaderboard-ws:
     image: velocity/leaderboard-ws:dev
     build:
-      context: ..
+      context: ../..
       dockerfile: services/leaderboard-ws/Dockerfile
       target: runtime
     container_name: velocity-leaderboard-ws
@@ -242,7 +242,7 @@ services:
   critique-service:
     image: velocity/critique-service:dev
     build:
-      context: ../services/critique-service
+      context: ../../services/critique-service
       dockerfile: Dockerfile
     container_name: velocity-critique-service
     profiles: [apps, llm]
@@ -262,7 +262,7 @@ services:
   anomaly-detector:
     image: velocity/anomaly-detector:dev
     build:
-      context: ../services/anomaly-detector
+      context: ../../services/anomaly-detector
       dockerfile: Dockerfile
     container_name: velocity-anomaly-detector
     profiles: [apps]
@@ -281,7 +281,7 @@ services:
   marketdata-generator:
     image: velocity/marketdata-generator:dev
     build:
-      context: ../services/marketdata-generator
+      context: ../../services/marketdata-generator
       dockerfile: Dockerfile
     container_name: velocity-marketdata-generator
     profiles: [apps]
@@ -309,7 +309,7 @@ services:
   audit-log:
     image: velocity/audit-log:dev
     build:
-      context: ../services/audit-log
+      context: ../../services/audit-log
       dockerfile: Dockerfile
     container_name: velocity-audit-log
     profiles: [apps]
@@ -331,7 +331,7 @@ services:
   frontend:
     image: velocity/frontend:dev
     build:
-      context: ../frontend
+      context: ../../frontend
       dockerfile: Dockerfile
       target: runtime
     container_name: velocity-frontend
