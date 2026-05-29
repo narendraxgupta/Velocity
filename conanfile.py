@@ -50,6 +50,10 @@ class VelocityRecipe(ConanFile):
         self.requires("protobuf/5.27.0")
         self.requires("grpc/1.65.0")
         self.requires("abseil/20240722.0", override=True)
+        # drogon's trantor pins c-ares/1.25.0 while grpc resolves it via a range
+        # to 1.34.6 -> conflict. 1.25.0 is inside grpc's [>=1.19.1 <2] range, so
+        # pin there to satisfy both.
+        self.requires("c-ares/1.25.0", override=True)
 
         # Logging & string formatting
         self.requires("spdlog/1.14.1")
