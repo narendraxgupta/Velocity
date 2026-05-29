@@ -82,7 +82,7 @@ find_package(hdr_histogram CONFIG REQUIRED)
 find_package(redis++   CONFIG)
 find_package(uwebsockets CONFIG)
 find_package(usockets    CONFIG)
-find_package(drogon    CONFIG REQUIRED)
+find_package(Drogon    CONFIG REQUIRED)
 
 # ---- Code generation from proto ---------------------------------------------
 include(VelocityProtoGen)

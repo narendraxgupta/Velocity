@@ -43,7 +43,7 @@ target_link_libraries(velocity-api-gateway
         velocity::common
         velocity::compile_options
         velocity::proto
-        drogon::drogon
+        Drogon::Drogon
         spdlog::spdlog
         nlohmann_json::nlohmann_json
         gRPC::grpc++

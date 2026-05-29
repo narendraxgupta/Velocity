@@ -24,7 +24,7 @@ target_link_libraries(velocity-sample-exchange
     PRIVATE
         velocity::common
         velocity::compile_options
-        drogon::drogon
+        Drogon::Drogon
         spdlog::spdlog
         nlohmann_json::nlohmann_json
         Boost::headers
