@@ -238,7 +238,7 @@ struct Ingester::Impl {
             bucket.mutable_submission_id()->set_value(sid);
             bucket.set_window_start_ns(window_start_ns);
             bucket.set_window_end_ns(end_ns);
-            bucket.set_count(static_cast<std::uint64_t>(hdr_total_count(h)));
+            bucket.set_count(static_cast<std::uint64_t>(h->total_count));
             bucket.set_p50_ns (value_at(h, 50.0));
             bucket.set_p90_ns (value_at(h, 90.0));
             bucket.set_p99_ns (value_at(h, 99.0));

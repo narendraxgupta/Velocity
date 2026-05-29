@@ -85,7 +85,7 @@ auto finalize_pcap_capture(const std::string& benchmark_id) -> void {
                 return;
             }
             VLOG_INFO("pcap-recorder finalised {} (status={})",
-                      benchmark_id, resp->statusCode());
+                      benchmark_id, static_cast<int>(resp->statusCode()));
         },
         /*timeout=*/10.0);
 }
