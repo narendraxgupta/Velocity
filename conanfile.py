@@ -69,7 +69,7 @@ class VelocityRecipe(ConanFile):
         self.requires("drogon/1.9.6")
 
         # WebSockets (uWebSockets) — used by leaderboard-ws and bot-worker
-        self.requires("usockets/0.8.6")
+        self.requires("usockets/0.8.8")
         self.requires("uwebsockets/20.66.0")
 
         # libcurl — portable REST transport in the bot worker
