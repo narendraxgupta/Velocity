@@ -76,7 +76,7 @@ ps: ## Show running services.
 ##@ Build
 
 .PHONY: build
-build: ## Build every container image.
+build:build-cpp-base ## Build every container image (builds the shared C++ builder first, then all apps).
 	$(COMPOSE) $(PROFILES_APPS) build
 
 .PHONY: build-cpp-base
