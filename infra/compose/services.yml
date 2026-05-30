@@ -315,7 +315,7 @@ services:
     profiles: [apps]
     networks: [apps, data]
     ports:
-      - "8081:8081"
+      - "8086:8081"
     environment:
       REDIS_ADDR:      redis:6379
       QUESTDB_HOST:    questdb
