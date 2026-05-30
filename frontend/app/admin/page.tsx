@@ -29,13 +29,20 @@ import { isDemoMode } from '@/lib/demo-data'
 import { cn, formatRelativeMs, middleTruncate } from '@/lib/utils'
 
 const PROFILES = [
-  { id: 'baseline',     name: 'Baseline',     hint: '50k rps · 30s hold · balanced mix' },
+  { id: 'codespace',    name: 'Codespace',    hint: '1.5k rps · 30s hold · single-box safe (recommended on a shared-CPU box)' },
+  { id: 'baseline',     name: 'Baseline',     hint: '50k rps · 30s hold · balanced mix (needs a real cluster)' },
   { id: 'spike',        name: 'Spike',        hint: '200k rps · 15s hold · aggressive takers' },
   { id: 'fire-hose',    name: 'Fire-hose',    hint: '1M rps · 60s hold · stress sustained' },
   { id: 'adversarial',  name: 'Adversarial',  hint: '80k rps · 35s hold · spoofers + cancellers' },
   { id: 'cliff-finder', name: 'Cliff finder', hint: '5k → 1.28M rps · exponential staircase · pinpoints the breaking RPS with CI' },
   { id: 'cross-venue',  name: 'Cross-venue',  hint: '150k rps · SPOT/PERP/FUTURES · reports cross-venue p99 skew' },
 ] as const
+
+// The `codespace` profile isn't a named controller profile — the gateway
+// turns a `target_rps` body into an ad-hoc override (see api-gateway
+// routes/benchmarks.cpp). This keeps single-box runs scorable without the
+// 50k-rps named profiles that collapse the score on shared CPU.
+const CODESPACE_OVERRIDE = { target_rps: 1500, ramp_seconds: 5, hold_seconds: 30 } as const
 
 type RunEntry = {
   benchmarkId: string
@@ -50,7 +57,7 @@ const STORAGE_KEY = 'velocity:admin:runs'
 
 export default function AdminPage() {
   const [submissionId, setSubmissionId] = useState('')
-  const [profile, setProfile] = useState<typeof PROFILES[number]['id']>('baseline')
+  const [profile, setProfile] = useState<typeof PROFILES[number]['id']>('codespace')
   const [busy, setBusy] = useState(false)
   const [runs, setRuns] = useState<RunEntry[]>([])
   const [message, setMessage] = useState<string | null>(null)
@@ -59,6 +66,13 @@ export default function AdminPage() {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY)
       if (raw) setRuns(JSON.parse(raw) as RunEntry[])
+    } catch {}
+    // Deep link from the upload flow: /admin?submission=<id> pre-fills the
+    // picker. Read from window.location to avoid the useSearchParams Suspense
+    // requirement for a one-shot hydration.
+    try {
+      const s = new URLSearchParams(window.location.search).get('submission')
+      if (s) setSubmissionId(s)
     } catch {}
   }, [])
 
@@ -89,10 +103,14 @@ export default function AdminPage() {
         return
       }
 
+      const payload =
+        profile === 'codespace'
+          ? { submission_id: submissionId, ...CODESPACE_OVERRIDE }
+          : { submission_id: submissionId, profile }
       const res = await apiFetch(`/v1/benchmarks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ submission_id: submissionId, profile }),
+        body: JSON.stringify(payload),
       })
       const body = await res.json()
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)

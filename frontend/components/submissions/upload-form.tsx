@@ -29,6 +29,39 @@ export function UploadForm() {
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<UploadResult | null>(null)
+  // Post-upload lifecycle: the gateway exposes build + deploy as explicit
+  // steps (POST /v1/submissions/{id}/build then /deploy). Surfacing them
+  // here lets a submitter take an artefact all the way to "ready to
+  // benchmark" without leaving the browser.
+  const [stage, setStage] = useState<
+    'idle' | 'building' | 'built' | 'deploying' | 'deployed'
+  >('idle')
+  const [stageErr, setStageErr] = useState<string | null>(null)
+
+  const runStep = async (
+    id: string,
+    step: 'build' | 'deploy',
+    pending: 'building' | 'deploying',
+    done: 'built' | 'deployed',
+    revert: 'idle' | 'built',
+  ) => {
+    setStage(pending)
+    setStageErr(null)
+    try {
+      const r = await apiFetch(
+        `/v1/submissions/${encodeURIComponent(id)}/${step}`,
+        { method: 'POST' },
+      )
+      if (!r.ok) throw new Error((await r.text()) || `HTTP ${r.status}`)
+      setStage(done)
+      toast.success(step === 'build' ? 'Build complete' : 'Deployed — ready to benchmark')
+    } catch (e) {
+      const message = (e as Error).message
+      setStage(revert)
+      setStageErr(`${step} failed: ${message}`)
+      toast.error(`${step === 'build' ? 'Build' : 'Deploy'} failed`, { description: message })
+    }
+  }
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -50,6 +83,8 @@ export function UploadForm() {
         return
       }
       const body = await resp.json()
+      setStage('idle')
+      setStageErr(null)
       setResult({
         kind: 'ok',
         submissionId: body.submission_id,
@@ -151,10 +186,46 @@ export function UploadForm() {
         )}
 
         {result && result.kind === 'ok' && (
-          <div className="md:col-span-2 rounded-md border border-signal-live/40 bg-signal-live/5 p-3 font-mono text-2xs text-foreground">
-            <div className="text-signal-live">Uploaded</div>
-            <div className="mt-1">submission_id: {result.submissionId}</div>
-            <div>sha256:       {result.sha256}</div>
+          <div className="md:col-span-2 space-y-3 rounded-md border border-signal-live/40 bg-signal-live/5 p-3 font-mono text-2xs text-foreground">
+            <div>
+              <div className="text-signal-live">Uploaded</div>
+              <div className="mt-1">submission_id: {result.submissionId}</div>
+              <div>sha256:       {result.sha256}</div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 border-t border-signal-live/20 pt-3">
+              <button
+                type="button"
+                onClick={() => runStep(result.submissionId, 'build', 'building', 'built', 'idle')}
+                disabled={stage === 'building' || stage === 'deploying'}
+                className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {stage === 'building' ? 'Building…' : stage === 'built' || stage === 'deploying' || stage === 'deployed' ? 'Built ✓' : '1 · Build'}
+              </button>
+              <button
+                type="button"
+                onClick={() => runStep(result.submissionId, 'deploy', 'deploying', 'deployed', 'built')}
+                disabled={stage === 'idle' || stage === 'building' || stage === 'deploying'}
+                className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {stage === 'deploying' ? 'Deploying…' : stage === 'deployed' ? 'Deployed ✓' : '2 · Deploy'}
+              </button>
+              {stage === 'deployed' && (
+                <a
+                  href={`/admin?submission=${encodeURIComponent(result.submissionId)}`}
+                  className="text-accent underline"
+                >
+                  3 · Benchmark in Admin →
+                </a>
+              )}
+            </div>
+
+            <div className="text-muted-foreground">
+              Build compiles the artefact into an image; Deploy starts the sandbox. Then pick the
+              <span className="text-foreground"> Codespace</span> profile in Admin and Start.
+            </div>
+
+            {stageErr && <div className="text-signal-ask">{stageErr}</div>}
           </div>
         )}
         {result && result.kind === 'error' && (

@@ -45,11 +45,17 @@ services:
     container_name: velocity-submission-engine
     profiles: [apps]
     networks: [apps, data]
+    # The docker backend talks to the mounted /var/run/docker.sock, which is
+    # owned by root:docker. The image defaults to the distroless `nonroot`
+    # user (correct for k8s), so override to root here in dev only.
     user: "0:0"
     ports:
       - "7001:7001"
     environment:
       VELOCITY_GRPC_PORT: 7001
+      # Dev/Codespace backend: build + run submissions on the local docker
+      # daemon (no Kubernetes). The sandbox attaches each submission to the
+      # velocity-apps network with the DNS name the bot-controller expects.
       VELOCITY_SANDBOX_BACKEND: docker
       VELOCITY_DOCKER_HOST: unix:///var/run/docker.sock
       VELOCITY_SANDBOX_NETWORK: velocity-apps
@@ -171,6 +177,12 @@ services:
       VELOCITY_LEADERBOARD_ZSET: leaderboard:composite
       VELOCITY_GROUP_ID: velocity-scoring
       VELOCITY_OTLP_ENDPOINT: jaeger:4317
+      # Single-box / Codespace tuning. The default scoring thresholds assume a
+      # kernel-bypass cluster: 50k rps sustained and a 30us p99. Over HTTP on a
+      # shared-CPU box the engine tops out ~1.5k rps with low-ms p99, so those
+      # defaults force throughput_score~0 and latency_score=0 -> composite 0 for
+      # an otherwise-correct engine. Normalise against an achievable target and a
+      # realistic round-trip so the leaderboard reflects real behaviour here.
       VELOCITY_DEFAULT_TARGET_RPS: "1500"
       VELOCITY_BASELINE_LATENCY_NS: "5000000"
     depends_on:
@@ -321,6 +333,8 @@ services:
     profiles: [apps]
     networks: [apps, data]
     ports:
+      # Host 8081 is taken by redpanda's Schema Registry; expose audit-log's
+      # HTTP API on 8086 instead. In-cluster peers still reach it at audit-log:8081.
       - "8086:8081"
     environment:
       REDIS_ADDR:      redis:6379
@@ -340,6 +354,15 @@ services:
       context: ../../frontend
       dockerfile: Dockerfile
       target: runtime
+      # NEXT_PUBLIC_* must be baked at build time (Next inlines them into the
+      # client bundle). For a Codespace, export the externally-reachable URLs
+      # before `compose build frontend`, e.g.:
+      #   export FRONTEND_API_URL=https://<name>-8080.app.github.dev
+      #   export FRONTEND_WS_URL=wss://<name>-8090.app.github.dev/v1/leaderboard
+      # They default to localhost for the plain docker-compose dev loop.
+      args:
+        NEXT_PUBLIC_API_GATEWAY_URL: ${FRONTEND_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_LEADERBOARD_WS: ${FRONTEND_WS_URL:-ws://localhost:8090/v1/leaderboard}
     container_name: velocity-frontend
     profiles: [apps]
     networks: [apps]
@@ -347,11 +370,10 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_GATEWAY_URL: http://localhost:8080
-      # NB: variable name must match what `use-leaderboard-stream.ts`
-      # reads (NEXT_PUBLIC_LEADERBOARD_WS, no `_URL` suffix). Path must
-      # match the route registered in leaderboard-ws/src/server.cpp.
-      NEXT_PUBLIC_LEADERBOARD_WS: ws://localhost:8090/v1/leaderboard
+      # Kept for parity/SSR; the values that reach the browser are the
+      # build args above (NEXT_PUBLIC_* are inlined at build time).
+      NEXT_PUBLIC_API_GATEWAY_URL: ${FRONTEND_API_URL:-http://localhost:8080}
+      NEXT_PUBLIC_LEADERBOARD_WS: ${FRONTEND_WS_URL:-ws://localhost:8090/v1/leaderboard}
     depends_on:
       - api-gateway
       - leaderboard-ws

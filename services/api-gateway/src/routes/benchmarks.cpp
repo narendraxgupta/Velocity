@@ -239,7 +239,29 @@ public:
         stamp_traceparent(ctx, span.context());
         velocity::orchestrator::v1::StartBenchmarkRequest sreq;
         sreq.mutable_submission_id()->set_value(j["submission_id"].get<std::string>());
-        sreq.set_profile_name(j.value("profile", "baseline"));
+
+        // Two ways to size a run:
+        //   - {"profile":"baseline"}  → named, cluster-scale profile (50k+ rps)
+        //   - {"target_rps":1500,...}  → ad-hoc override at a caller-chosen rate
+        // The override is what makes single-box / Codespace runs scorable:
+        // the named profiles offer far more load than a shared-CPU engine can
+        // complete, which collapses latency + throughput + correctness to ~0.
+        // When target_rps is present we synthesise a minimal linear ramp→hold
+        // override (no persona mix → controller defaults to MARKET_MAKER),
+        // mirroring scripts/e2e-smoke.sh's gRPC override.
+        if (j.contains("target_rps")) {
+            auto* ov = sreq.mutable_override();
+            ov->set_target_rps(j["target_rps"].get<std::uint64_t>());
+            ov->set_ramp_seconds(
+                static_cast<std::uint32_t>(j.value("ramp_seconds", 5)));
+            ov->set_hold_seconds(
+                static_cast<std::uint32_t>(j.value("hold_seconds", 30)));
+            ov->set_per_order_timeout_us(250'000);
+            span.set_attribute("target_rps",
+                               static_cast<std::int64_t>(ov->target_rps()));
+        } else {
+            sreq.set_profile_name(j.value("profile", "baseline"));
+        }
 
         velocity::orchestrator::v1::StartBenchmarkResponse sresp;
         const auto status = clients::GrpcClients::benchmark()->StartBenchmark(&ctx, sreq, &sresp);

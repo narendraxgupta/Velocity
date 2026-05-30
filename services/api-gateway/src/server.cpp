@@ -57,6 +57,56 @@ auto Server::run() -> void {
 
     auto& app = drogon::app();
 
+    // ---------------------------------------------------------------------
+    //  CORS. The SPA frontend is served from a different origin than this
+    //  gateway (in dev: localhost:3000 vs :8080; in a Codespace: the
+    //  *-3000 vs *-8080 github.dev hosts), so the browser issues
+    //  cross-origin requests that need explicit CORS headers. We reflect
+    //  the request Origin (so it works for any dev/Codespace host without
+    //  an allowlist) and allow credentials. A wildcard origin is
+    //  incompatible with Allow-Credentials, hence the reflection.
+    //
+    //  This is permissive on purpose for dev. In production the gateway
+    //  sits behind an edge proxy that pins Allow-Origin to the known SPA
+    //  host; that belongs in infra, not here.
+    // ---------------------------------------------------------------------
+    const auto cors_origin = [](const drogon::HttpRequestPtr& req) -> std::string {
+        const auto& o = req->getHeader("origin");
+        return o.empty() ? std::string{"*"} : o;
+    };
+
+    // Preflight: answer OPTIONS immediately, BEFORE the auth/RBAC advice
+    // below — otherwise the unauthenticated preflight would be rejected
+    // and the browser would never send the real request.
+    app.registerSyncAdvice([cors_origin](const drogon::HttpRequestPtr& req)
+                               -> drogon::HttpResponsePtr {
+        if (req->method() != drogon::Options) return drogon::HttpResponsePtr{};
+        auto resp = drogon::HttpResponse::newHttpResponse();
+        resp->setStatusCode(drogon::k204NoContent);
+        resp->addHeader("Access-Control-Allow-Origin",  cors_origin(req));
+        resp->addHeader("Access-Control-Allow-Methods",
+                        "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+        resp->addHeader("Access-Control-Allow-Headers",
+                        "Authorization, Content-Type, traceparent, X-Velocity-Tenant");
+        resp->addHeader("Access-Control-Allow-Credentials", "true");
+        resp->addHeader("Access-Control-Max-Age", "86400");
+        resp->addHeader("Vary", "Origin");
+        return resp;
+    });
+
+    // Stamp the CORS allow headers onto every real response. Guard against
+    // double-stamping: if this also fires on the short-circuited OPTIONS
+    // response above, a second Access-Control-Allow-Origin would make the
+    // browser reject the response ("multiple values").
+    app.registerPostHandlingAdvice(
+        [cors_origin](const drogon::HttpRequestPtr& req,
+                      const drogon::HttpResponsePtr& resp) {
+            if (!resp->getHeader("Access-Control-Allow-Origin").empty()) return;
+            resp->addHeader("Access-Control-Allow-Origin",      cors_origin(req));
+            resp->addHeader("Access-Control-Allow-Credentials", "true");
+            resp->addHeader("Vary", "Origin");
+        });
+
     app.addListener(impl_->cfg.listen_host, impl_->cfg.http_port)
        .setThreadNum(0)                            // 0 = one thread per core
        .setLogPath("")                             // we route through spdlog
