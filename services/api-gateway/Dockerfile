@@ -17,7 +17,8 @@ FROM ubuntu:24.04 AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
-      libssl3 \
+      libssl3 libatomic1 \
+      libatomic1 \
       tini \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --system --gid 10001 velocity \

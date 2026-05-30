@@ -8,7 +8,7 @@ RUN cmake --build --preset conan-release --target velocity-bot-controller
 
 FROM ubuntu:24.04 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates libssl3 tini \
+      ca-certificates libssl3 libatomic1 libatomic1 tini \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --system --gid 10001 velocity \
  && useradd  --system --uid 10001 --gid velocity velocity
