@@ -21,7 +21,7 @@ services:
     environment:
       VELOCITY_HTTP_PORT: 8080
       VELOCITY_REDPANDA_BROKERS: redpanda:29092
-      VELOCITY_REDIS_ADDR: redis:6379
+      VELOCITY_REDIS_ADDR: tcp://redis:6379
       VELOCITY_SUBMISSION_ENGINE_GRPC: submission-engine:7001
       VELOCITY_BOT_CONTROLLER_GRPC: bot-controller:7002
       VELOCITY_MINIO_ENDPOINT: minio:9000
@@ -58,7 +58,7 @@ services:
       VELOCITY_MINIO_ENDPOINT: minio:9000
       VELOCITY_MINIO_ACCESS_KEY: velocity
       VELOCITY_MINIO_SECRET_KEY: velocity-dev-secret
-      VELOCITY_REDIS_ADDR: redis:6379
+      VELOCITY_REDIS_ADDR: redis://redis:6379
       VELOCITY_OTLP_ENDPOINT: jaeger:4317
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -128,7 +128,7 @@ services:
       VELOCITY_REDPANDA_BROKERS: redpanda:29092
       VELOCITY_QUESTDB_HOST: questdb
       VELOCITY_QUESTDB_ILP_PORT: 9009
-      VELOCITY_REDIS_ADDR: redis:6379
+      VELOCITY_REDIS_ADDR: tcp://redis:6379
       VELOCITY_OTLP_ENDPOINT: jaeger:4317
     depends_on:
       redpanda: { condition: service_healthy }
@@ -188,7 +188,7 @@ services:
       - "8090:8090"
     environment:
       VELOCITY_WS_PORT: 8090
-      VELOCITY_REDIS_ADDR: redis:6379
+      VELOCITY_REDIS_ADDR: tcp://redis:6379
       VELOCITY_OTLP_ENDPOINT: jaeger:4317
     depends_on:
       redis: { condition: service_healthy }

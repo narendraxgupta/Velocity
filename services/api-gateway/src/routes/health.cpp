@@ -16,8 +16,8 @@ namespace velocity::api_gateway::routes {
 class Health : public drogon::HttpController<Health> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(Health::live,  "/healthz", drogon::Get);
-        METHOD_ADD(Health::ready, "/readyz",  drogon::Get);
+        ADD_METHOD_TO(Health::live,  "/healthz", drogon::Get);
+        ADD_METHOD_TO(Health::ready, "/readyz",  drogon::Get);
     METHOD_LIST_END
 
     auto live(const drogon::HttpRequestPtr& /*req*/,
@@ -27,7 +27,7 @@ public:
             {"service",     "api-gateway"},
             {"ts_ns",       velocity::time::realtime_ns()},
         };
-        auto resp = drogon::HttpResponse::newHttpJsonResponse(body.dump());
+        auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump());
         callback(resp);
     }
 
@@ -38,7 +38,7 @@ public:
             {"status", "ok"},
             {"checks", nlohmann::json::object()},
         };
-        callback(drogon::HttpResponse::newHttpJsonResponse(body.dump()));
+        callback([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump()));
     }
 };
 

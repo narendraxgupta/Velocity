@@ -29,7 +29,7 @@ namespace velocity::api_gateway::routes {
 class Auth : public drogon::HttpController<Auth> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(Auth::me, "/v1/auth/me", drogon::Get);
+        ADD_METHOD_TO(Auth::me, "/v1/auth/me", drogon::Get);
     METHOD_LIST_END
 
     auto me(const drogon::HttpRequestPtr& req,
@@ -41,7 +41,7 @@ public:
             // 401 here, but if /v1/auth/me ever winds up on a bypass
             // list this keeps the contract honest.
             nlohmann::json body{{"error", "unauthenticated"}};
-            auto resp = drogon::HttpResponse::newHttpJsonResponse(body.dump());
+            auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump());
             resp->setStatusCode(drogon::k401Unauthorized);
             callback(resp);
             return;
@@ -67,7 +67,7 @@ public:
             {"role",          tenant::role_to_string(ctx->role)},
             {"capabilities",  caps},
         };
-        callback(drogon::HttpResponse::newHttpJsonResponse(body.dump()));
+        callback([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump()));
     }
 
 private:

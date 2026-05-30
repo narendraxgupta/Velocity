@@ -53,7 +53,7 @@ auto forward(const drogon::HttpRequestPtr& req,
     chaos_client()->sendRequest(out,
         [cb = std::move(cb)](drogon::ReqResult r, const drogon::HttpResponsePtr& resp) {
             if (r != drogon::ReqResult::Ok || !resp) {
-                auto err = drogon::HttpResponse::newHttpJsonResponse(
+                auto err = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(
                     R"({"error":"chaos-orchestrator unreachable"})");
                 err->setStatusCode(drogon::k503ServiceUnavailable);
                 cb(err);
@@ -69,12 +69,12 @@ auto forward(const drogon::HttpRequestPtr& req,
 class Chaos : public drogon::HttpController<Chaos> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(Chaos::status,      "/v1/chaos/status",         drogon::Get);
-        METHOD_ADD(Chaos::podKill,     "/v1/chaos/pod-kill",       drogon::Post);
-        METHOD_ADD(Chaos::tcLatency,   "/v1/chaos/tc-latency",     drogon::Post);
-        METHOD_ADD(Chaos::tcLoss,      "/v1/chaos/tc-loss",        drogon::Post);
-        METHOD_ADD(Chaos::cpuThrottle, "/v1/chaos/cpu-throttle",   drogon::Post);
-        METHOD_ADD(Chaos::partition,   "/v1/chaos/partition",      drogon::Post);
+        ADD_METHOD_TO(Chaos::status,      "/v1/chaos/status",         drogon::Get);
+        ADD_METHOD_TO(Chaos::podKill,     "/v1/chaos/pod-kill",       drogon::Post);
+        ADD_METHOD_TO(Chaos::tcLatency,   "/v1/chaos/tc-latency",     drogon::Post);
+        ADD_METHOD_TO(Chaos::tcLoss,      "/v1/chaos/tc-loss",        drogon::Post);
+        ADD_METHOD_TO(Chaos::cpuThrottle, "/v1/chaos/cpu-throttle",   drogon::Post);
+        ADD_METHOD_TO(Chaos::partition,   "/v1/chaos/partition",      drogon::Post);
     METHOD_LIST_END
 
     auto status     (const drogon::HttpRequestPtr& r,

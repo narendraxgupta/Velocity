@@ -22,10 +22,10 @@ namespace velocity::api_gateway::routes {
 class LeaderboardRead : public drogon::HttpController<LeaderboardRead> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(LeaderboardRead::top,         "/v1/leaderboard",                drogon::Get);
-        METHOD_ADD(LeaderboardRead::detail,      "/v1/submissions/{id}/score",     drogon::Get);
-        METHOD_ADD(LeaderboardRead::mismatches,  "/v1/submissions/{id}/mismatches", drogon::Get);
-        METHOD_ADD(LeaderboardRead::buildLogs,   "/v1/submissions/{id}/build/logs", drogon::Get);
+        ADD_METHOD_TO(LeaderboardRead::top,         "/v1/leaderboard",                drogon::Get);
+        ADD_METHOD_TO(LeaderboardRead::detail,      "/v1/submissions/{id}/score",     drogon::Get);
+        ADD_METHOD_TO(LeaderboardRead::mismatches,  "/v1/submissions/{id}/mismatches", drogon::Get);
+        ADD_METHOD_TO(LeaderboardRead::buildLogs,   "/v1/submissions/{id}/build/logs", drogon::Get);
     METHOD_LIST_END
 
     auto top(const drogon::HttpRequestPtr& req,
@@ -68,13 +68,13 @@ public:
             }
         } catch (const std::exception& e) {
             VLOG_WARN("leaderboard read failed: {}", e.what());
-            auto r = drogon::HttpResponse::newHttpJsonResponse(
+            auto r = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(
                 R"({"entries":[],"error":"redis_failed"})");
             r->setStatusCode(drogon::k500InternalServerError);
             callback(r);
             return;
         }
-        auto resp = drogon::HttpResponse::newHttpJsonResponse(out.dump());
+        auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(out.dump());
         resp->addHeader("Cache-Control", "public, max-age=2");
         callback(resp);
     }
@@ -93,7 +93,7 @@ public:
             VLOG_WARN("score detail read failed: {}", e.what());
         }
         if (entry.empty()) {
-            auto r = drogon::HttpResponse::newHttpJsonResponse(R"({"error":"not_found"})");
+            auto r = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(R"({"error":"not_found"})");
             r->setStatusCode(drogon::k404NotFound);
             callback(r);
             return;
@@ -101,7 +101,7 @@ public:
 
         nlohmann::json out;
         for (const auto& [k, v] : entry) out[k] = v;
-        callback(drogon::HttpResponse::newHttpJsonResponse(out.dump()));
+        callback([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(out.dump()));
     }
 
     auto mismatches(const drogon::HttpRequestPtr& req,
@@ -144,7 +144,7 @@ public:
         } catch (const std::exception& e) {
             VLOG_WARN("mismatches read failed: {}", e.what());
         }
-        callback(drogon::HttpResponse::newHttpJsonResponse(out.dump()));
+        callback([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(out.dump()));
     }
 
     // GET /v1/submissions/:id/build/logs?since=<index>&n=<count>
@@ -180,14 +180,14 @@ public:
         } catch (const std::exception& e) {
             VLOG_WARN("build logs read failed: {}", e.what());
         }
-        auto resp = drogon::HttpResponse::newHttpJsonResponse(out.dump());
+        auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(out.dump());
         resp->addHeader("Cache-Control", "no-cache");
         callback(resp);
     }
 
 private:
     static auto send_503(const std::function<void(const drogon::HttpResponsePtr&)>& cb) -> void {
-        auto r = drogon::HttpResponse::newHttpJsonResponse(
+        auto r = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(
             R"({"entries":[],"error":"redis_unavailable"})");
         r->setStatusCode(drogon::k503ServiceUnavailable);
         cb(r);

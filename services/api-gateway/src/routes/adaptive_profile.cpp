@@ -49,7 +49,7 @@ auto forward(const drogon::HttpRequestPtr& req,
         [cb = std::move(cb)](drogon::ReqResult r,
                              const drogon::HttpResponsePtr& resp) {
             if (r != drogon::ReqResult::Ok || !resp) {
-                auto err = drogon::HttpResponse::newHttpJsonResponse(
+                auto err = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(
                     R"({"error":"anomaly-detector unreachable"})");
                 err->setStatusCode(drogon::k503ServiceUnavailable);
                 cb(err);
@@ -65,8 +65,8 @@ auto forward(const drogon::HttpRequestPtr& req,
 class AdaptiveProfile : public drogon::HttpController<AdaptiveProfile> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(AdaptiveProfile::propose, "/v1/submissions/{id}/adaptive-profile", drogon::Post);
-        METHOD_ADD(AdaptiveProfile::cached,  "/v1/submissions/{id}/adaptive-profile", drogon::Get);
+        ADD_METHOD_TO(AdaptiveProfile::propose, "/v1/submissions/{id}/adaptive-profile", drogon::Post);
+        ADD_METHOD_TO(AdaptiveProfile::cached,  "/v1/submissions/{id}/adaptive-profile", drogon::Get);
     METHOD_LIST_END
 
     auto propose(const drogon::HttpRequestPtr& r,

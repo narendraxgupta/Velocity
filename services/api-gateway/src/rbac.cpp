@@ -141,7 +141,7 @@ auto deny_response(Decision d) -> drogon::HttpResponsePtr {
         default:
             return nullptr;
     }
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(body.dump());
+    auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump());
     resp->setStatusCode(code);
     if (d == Decision::DENY_UNAUTHENTICATED) {
         resp->addHeader("WWW-Authenticate", "Bearer");

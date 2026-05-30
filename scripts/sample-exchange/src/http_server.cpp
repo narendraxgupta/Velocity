@@ -48,7 +48,7 @@ std::unique_ptr<OrderBook> g_book;
 
 [[nodiscard]] auto json_error(drogon::HttpStatusCode code, std::string_view msg) {
     nlohmann::json body{{"error", msg}};
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(body.dump());
+    auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump());
     resp->setStatusCode(code);
     return resp;
 }
@@ -56,15 +56,15 @@ std::unique_ptr<OrderBook> g_book;
 class Routes : public drogon::HttpController<Routes> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(Routes::health, "/healthz",      drogon::Get);
-        METHOD_ADD(Routes::place,  "/orders",       drogon::Post);
-        METHOD_ADD(Routes::cancel, "/orders/{id}",  drogon::Delete);
-        METHOD_ADD(Routes::book,   "/book",         drogon::Get);
+        ADD_METHOD_TO(Routes::health, "/healthz",      drogon::Get);
+        ADD_METHOD_TO(Routes::place,  "/orders",       drogon::Post);
+        ADD_METHOD_TO(Routes::cancel, "/orders/{id}",  drogon::Delete);
+        ADD_METHOD_TO(Routes::book,   "/book",         drogon::Get);
     METHOD_LIST_END
 
     auto health(const drogon::HttpRequestPtr&,
                 std::function<void(const drogon::HttpResponsePtr&)>&& cb) const -> void {
-        cb(drogon::HttpResponse::newHttpJsonResponse(R"({"status":"ok","service":"sample-exchange"})"));
+        cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(R"({"status":"ok","service":"sample-exchange"})"));
     }
 
     auto place(const drogon::HttpRequestPtr& req,
@@ -119,7 +119,7 @@ public:
             {"fills",             fills},
             {"resting_quantity",  outcome.resting_quantity},
         };
-        cb(drogon::HttpResponse::newHttpJsonResponse(body.dump()));
+        cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump()));
     }
 
     auto cancel(const drogon::HttpRequestPtr&,
@@ -162,7 +162,7 @@ public:
         for (const auto& l : asks) ask_arr.push_back({{"price", l.price}, {"qty", l.quantity}, {"orders", l.order_count}});
 
         nlohmann::json body{{"bids", bid_arr}, {"asks", ask_arr}};
-        cb(drogon::HttpResponse::newHttpJsonResponse(body.dump()));
+        cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump()));
     }
 };
 

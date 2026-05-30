@@ -72,7 +72,7 @@ auto forward(const std::shared_ptr<drogon::HttpClient>& client,
         [cb = std::move(cb), service_label](
             drogon::ReqResult r, const drogon::HttpResponsePtr& resp) {
             if (r != drogon::ReqResult::Ok || !resp) {
-                auto err = drogon::HttpResponse::newHttpJsonResponse(
+                auto err = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(
                     R"({"error":")" + service_label + R"( unreachable"})");
                 err->setStatusCode(drogon::k503ServiceUnavailable);
                 cb(err);
@@ -89,18 +89,18 @@ class Pcaps : public drogon::HttpController<Pcaps> {
 public:
     METHOD_LIST_BEGIN
         // pcap-replayer surface
-        METHOD_ADD(Pcaps::startReplay,    "/v1/pcaps/replay",        drogon::Post);
-        METHOD_ADD(Pcaps::listPcaps,      "/v1/pcaps",               drogon::Get);
-        METHOD_ADD(Pcaps::watchReplay,    "/v1/pcaps/{id}/state",    drogon::Get);
-        METHOD_ADD(Pcaps::cancelReplay,   "/v1/pcaps/{id}/cancel",   drogon::Post);
+        ADD_METHOD_TO(Pcaps::startReplay,    "/v1/pcaps/replay",        drogon::Post);
+        ADD_METHOD_TO(Pcaps::listPcaps,      "/v1/pcaps",               drogon::Get);
+        ADD_METHOD_TO(Pcaps::watchReplay,    "/v1/pcaps/{id}/state",    drogon::Get);
+        ADD_METHOD_TO(Pcaps::cancelReplay,   "/v1/pcaps/{id}/cancel",   drogon::Post);
         // pcap-recorder surface
-        METHOD_ADD(Pcaps::startRecording, "/v1/recorder/start",      drogon::Post);
-        METHOD_ADD(Pcaps::stopRecording,  "/v1/recorder/stop",       drogon::Post);
-        METHOD_ADD(Pcaps::recorderState,  "/v1/recorder/state",      drogon::Get);
+        ADD_METHOD_TO(Pcaps::startRecording, "/v1/recorder/start",      drogon::Post);
+        ADD_METHOD_TO(Pcaps::stopRecording,  "/v1/recorder/stop",       drogon::Post);
+        ADD_METHOD_TO(Pcaps::recorderState,  "/v1/recorder/state",      drogon::Get);
         // Convenience shim: GET /v1/benchmarks/{id}/pcap → presigned MinIO URL.
         // We forward to the recorder which is the only service holding the
         // MinIO credentials for the pcap bucket prefix.
-        METHOD_ADD(Pcaps::pcapDownload,   "/v1/benchmarks/{id}/pcap", drogon::Get);
+        ADD_METHOD_TO(Pcaps::pcapDownload,   "/v1/benchmarks/{id}/pcap", drogon::Get);
     METHOD_LIST_END
 
     auto startReplay(const drogon::HttpRequestPtr& r,

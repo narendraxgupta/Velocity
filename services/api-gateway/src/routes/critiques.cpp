@@ -57,7 +57,7 @@ auto forward(const drogon::HttpRequestPtr& req,
         [cb = std::move(cb)](drogon::ReqResult r,
                              const drogon::HttpResponsePtr& resp) {
             if (r != drogon::ReqResult::Ok || !resp) {
-                auto err = drogon::HttpResponse::newHttpJsonResponse(
+                auto err = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(
                     R"({"error":"critique-service unreachable"})");
                 err->setStatusCode(drogon::k503ServiceUnavailable);
                 cb(err);
@@ -75,9 +75,9 @@ auto forward(const drogon::HttpRequestPtr& req,
 class Critiques : public drogon::HttpController<Critiques> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(Critiques::create,             "/v1/critiques",                              drogon::Post);
-        METHOD_ADD(Critiques::getByID,            "/v1/critiques/{id}",                         drogon::Get);
-        METHOD_ADD(Critiques::getBySubmission,    "/v1/submissions/{id}/critique",              drogon::Get);
+        ADD_METHOD_TO(Critiques::create,             "/v1/critiques",                              drogon::Post);
+        ADD_METHOD_TO(Critiques::getByID,            "/v1/critiques/{id}",                         drogon::Get);
+        ADD_METHOD_TO(Critiques::getBySubmission,    "/v1/submissions/{id}/critique",              drogon::Get);
     METHOD_LIST_END
 
     auto create(const drogon::HttpRequestPtr& r,

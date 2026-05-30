@@ -33,7 +33,7 @@ auto upstream() -> std::string {
 class Audit : public drogon::HttpController<Audit> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(Audit::list, "/v1/audit", drogon::Get);
+        ADD_METHOD_TO(Audit::list, "/v1/audit", drogon::Get);
     METHOD_LIST_END
 
     auto list(const drogon::HttpRequestPtr& req,
@@ -57,7 +57,7 @@ public:
                                const drogon::HttpResponsePtr& resp) {
                 if (result != drogon::ReqResult::Ok || !resp) {
                     nlohmann::json err{{"error", "audit-log unreachable"}};
-                    auto out = drogon::HttpResponse::newHttpJsonResponse(err.dump());
+                    auto out = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(err.dump());
                     out->setStatusCode(drogon::k502BadGateway);
                     callback(out);
                     return;

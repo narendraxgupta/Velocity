@@ -85,9 +85,9 @@ constexpr std::int64_t DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60;
 class Share : public drogon::HttpController<Share> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(Share::mint,   "/v1/share",          drogon::Post);
-        METHOD_ADD(Share::view,   "/v1/share/{token}",  drogon::Get);
-        METHOD_ADD(Share::revoke, "/v1/share/{token}",  drogon::Delete);
+        ADD_METHOD_TO(Share::mint,   "/v1/share",          drogon::Post);
+        ADD_METHOD_TO(Share::view,   "/v1/share/{token}",  drogon::Get);
+        ADD_METHOD_TO(Share::revoke, "/v1/share/{token}",  drogon::Delete);
     METHOD_LIST_END
 
     auto mint(const drogon::HttpRequestPtr& req,
@@ -186,7 +186,7 @@ public:
             {"url",   "/share/" + token},
             {"ttl_seconds", ttl_seconds},
         };
-        auto resp = drogon::HttpResponse::newHttpJsonResponse(out.dump());
+        auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(out.dump());
         resp->setStatusCode(drogon::k201Created);
         cb(resp);
     }
@@ -292,7 +292,7 @@ private:
     static auto json_error(drogon::HttpStatusCode code, std::string_view msg)
         -> drogon::HttpResponsePtr {
         nlohmann::json body{{"error", std::string{msg}}};
-        auto resp = drogon::HttpResponse::newHttpJsonResponse(body.dump());
+        auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump());
         resp->setStatusCode(code);
         return resp;
     }

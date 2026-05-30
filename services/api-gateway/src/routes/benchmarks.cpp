@@ -33,7 +33,7 @@ namespace {
 
 [[nodiscard]] auto json_error(drogon::HttpStatusCode code, std::string_view msg) {
     nlohmann::json body{{"error", msg}};
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(body.dump());
+    auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump());
     resp->setStatusCode(code);
     return resp;
 }
@@ -204,10 +204,10 @@ auto kickoff_pcap_capture(const std::string& benchmark_id,
 class Benchmarks : public drogon::HttpController<Benchmarks> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(Benchmarks::start,  "/v1/benchmarks",                drogon::Post);
-        METHOD_ADD(Benchmarks::report, "/v1/benchmarks/{id}",           drogon::Get);
-        METHOD_ADD(Benchmarks::cancel, "/v1/benchmarks/{id}/cancel",    drogon::Post);
-        METHOD_ADD(Benchmarks::stream, "/v1/benchmarks/{id}/stream",    drogon::Get);
+        ADD_METHOD_TO(Benchmarks::start,  "/v1/benchmarks",                drogon::Post);
+        ADD_METHOD_TO(Benchmarks::report, "/v1/benchmarks/{id}",           drogon::Get);
+        ADD_METHOD_TO(Benchmarks::cancel, "/v1/benchmarks/{id}/cancel",    drogon::Post);
+        ADD_METHOD_TO(Benchmarks::stream, "/v1/benchmarks/{id}/stream",    drogon::Get);
     METHOD_LIST_END
 
     // -------------------------------------------------------------------------
@@ -276,7 +276,7 @@ public:
             {"started_at_ns", sresp.started_at_ns()},
             {"trace_id",      root_trace_id},
         };
-        auto resp = drogon::HttpResponse::newHttpJsonResponse(body.dump());
+        auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump());
         resp->addHeader("traceparent",
                         velocity::common::tracing::to_traceparent(span.context()));
         resp->setStatusCode(drogon::k201Created);
@@ -311,7 +311,7 @@ public:
         // reaper would do this eventually but we'd rather not wait.
         finalize_pcap_capture(id);
         nlohmann::json body{{"cancelled", cresp.cancelled()}};
-        cb(drogon::HttpResponse::newHttpJsonResponse(body.dump()));
+        cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump()));
     }
 
     // -------------------------------------------------------------------------
@@ -382,7 +382,7 @@ public:
         body["venues"] = std::move(venues);
         body["cross_venue_skew_ns"] = gresp.cross_venue_skew_ns();
 
-        cb(drogon::HttpResponse::newHttpJsonResponse(body.dump()));
+        cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump()));
     }
 
     // -------------------------------------------------------------------------

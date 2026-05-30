@@ -70,7 +70,7 @@ auto Server::run() -> void {
            auto tctx = tenant::resolve(req);
            if (!tctx) {
                nlohmann::json body{{"error", "authentication required"}};
-               auto resp = drogon::HttpResponse::newHttpJsonResponse(body.dump());
+               auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump());
                resp->setStatusCode(drogon::k401Unauthorized);
                resp->addHeader("WWW-Authenticate", "Bearer");
                return resp;

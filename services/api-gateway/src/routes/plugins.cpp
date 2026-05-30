@@ -30,8 +30,8 @@ auto upstream() -> std::string {
 class Plugins : public drogon::HttpController<Plugins> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(Plugins::list,      "/v1/plugins/{tenant}",           drogon::Get);
-        METHOD_ADD(Plugins::reconcile, "/v1/plugins/{tenant}/reconcile", drogon::Post);
+        ADD_METHOD_TO(Plugins::list,      "/v1/plugins/{tenant}",           drogon::Get);
+        ADD_METHOD_TO(Plugins::reconcile, "/v1/plugins/{tenant}/reconcile", drogon::Post);
     METHOD_LIST_END
 
     auto list(const drogon::HttpRequestPtr& /*req*/,
@@ -81,7 +81,7 @@ private:
         -> void {
         if (result != drogon::ReqResult::Ok || !resp) {
             nlohmann::json err{{"error", "plugin-orchestrator unreachable"}};
-            auto out = drogon::HttpResponse::newHttpJsonResponse(err.dump());
+            auto out = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(err.dump());
             out->setStatusCode(drogon::k502BadGateway);
             cb(out);
             return;

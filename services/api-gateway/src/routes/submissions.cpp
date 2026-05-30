@@ -54,7 +54,7 @@ namespace {
 
 [[nodiscard]] auto json_error(drogon::HttpStatusCode code, std::string_view msg) {
     nlohmann::json body{{"error", msg}};
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(body.dump());
+    auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump());
     resp->setStatusCode(code);
     return resp;
 }
@@ -84,13 +84,13 @@ auto stamp_traceparent(grpc::ClientContext& ctx,
 class Submissions : public drogon::HttpController<Submissions> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(Submissions::create,     "/v1/submissions",                  drogon::Post);
-        METHOD_ADD(Submissions::list,       "/v1/submissions",                  drogon::Get);
-        METHOD_ADD(Submissions::detail,     "/v1/submissions/{id}",             drogon::Get);
-        METHOD_ADD(Submissions::build,      "/v1/submissions/{id}/build",       drogon::Post);
-        METHOD_ADD(Submissions::deploy,     "/v1/submissions/{id}/deploy",      drogon::Post);
-        METHOD_ADD(Submissions::teardown,   "/v1/submissions/{id}/teardown",    drogon::Post);
-        METHOD_ADD(Submissions::flamegraph, "/v1/submissions/{id}/flamegraph",  drogon::Get);
+        ADD_METHOD_TO(Submissions::create,     "/v1/submissions",                  drogon::Post);
+        ADD_METHOD_TO(Submissions::list,       "/v1/submissions",                  drogon::Get);
+        ADD_METHOD_TO(Submissions::detail,     "/v1/submissions/{id}",             drogon::Get);
+        ADD_METHOD_TO(Submissions::build,      "/v1/submissions/{id}/build",       drogon::Post);
+        ADD_METHOD_TO(Submissions::deploy,     "/v1/submissions/{id}/deploy",      drogon::Post);
+        ADD_METHOD_TO(Submissions::teardown,   "/v1/submissions/{id}/teardown",    drogon::Post);
+        ADD_METHOD_TO(Submissions::flamegraph, "/v1/submissions/{id}/flamegraph",  drogon::Get);
     METHOD_LIST_END
 
     // -------------------------------------------------------------------------
@@ -189,7 +189,7 @@ public:
             {"sha256",              upload_resp.sha256()},
             {"received_bytes",      upload_resp.received_bytes()},
         };
-        auto resp = drogon::HttpResponse::newHttpJsonResponse(body_out.dump());
+        auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body_out.dump());
         resp->addHeader("traceparent",
                         velocity::common::tracing::to_traceparent(span.context()));
         resp->setStatusCode(drogon::k201Created);
@@ -203,7 +203,7 @@ public:
               std::function<void(const drogon::HttpResponsePtr&)>&& cb) const -> void {
         // Listing is owned by the submission-engine via its database, not
         // surfaced over gRPC yet — return an empty array until then.
-        cb(drogon::HttpResponse::newHttpJsonResponse(R"({"items":[]})"));
+        cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(R"({"items":[]})"));
     }
 
     // -------------------------------------------------------------------------
@@ -237,7 +237,7 @@ public:
             {"detail",        snap.detail()},
             {"ts_ns",         snap.ts_ns()},
         };
-        cb(drogon::HttpResponse::newHttpJsonResponse(body.dump()));
+        cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump()));
     }
 
     // -------------------------------------------------------------------------
@@ -267,7 +267,7 @@ public:
         }
         span.set_attribute("image_ref", resp.image_ref());
         nlohmann::json body{{"submission_id", id}, {"image_ref", resp.image_ref()}};
-        auto out = drogon::HttpResponse::newHttpJsonResponse(body.dump());
+        auto out = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump());
         out->setStatusCode(drogon::k202Accepted);
         cb(out);
     }
@@ -311,7 +311,7 @@ public:
             {"pod_name",  resp.pod_name()},
             {"namespace", resp.namespace_()},
         };
-        cb(drogon::HttpResponse::newHttpJsonResponse(body.dump()));
+        cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump()));
     }
 
     // -------------------------------------------------------------------------
@@ -349,7 +349,7 @@ public:
             {"sample_freq_hz",   resp.sample_freq_hz()},
             {"duration_seconds", resp.duration_seconds()},
         };
-        cb(drogon::HttpResponse::newHttpJsonResponse(body.dump()));
+        cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump()));
     }
 
     // -------------------------------------------------------------------------
@@ -373,7 +373,7 @@ public:
             {"submission_id", id},
             {"teardown_complete", tresp.teardown_complete()},
         };
-        cb(drogon::HttpResponse::newHttpJsonResponse(body.dump()));
+        cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump()));
     }
 };
 

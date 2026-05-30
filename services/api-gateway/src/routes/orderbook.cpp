@@ -40,7 +40,7 @@ namespace {
 
 [[nodiscard]] auto json_error(drogon::HttpStatusCode code, std::string_view msg) {
     nlohmann::json body{{"error", msg}};
-    auto resp = drogon::HttpResponse::newHttpJsonResponse(body.dump());
+    auto resp = [](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump());
     resp->setStatusCode(code);
     return resp;
 }
@@ -54,9 +54,9 @@ constexpr std::int64_t kSnapToleranceMs = 200;
 class Orderbook : public drogon::HttpController<Orderbook> {
 public:
     METHOD_LIST_BEGIN
-        METHOD_ADD(Orderbook::timeline,    "/v1/submissions/{id}/orderbook/timeline", drogon::Get);
-        METHOD_ADD(Orderbook::snapshot,    "/v1/submissions/{id}/orderbook",          drogon::Get);
-        METHOD_ADD(Orderbook::execQuality, "/v1/submissions/{id}/exec-quality",       drogon::Get);
+        ADD_METHOD_TO(Orderbook::timeline,    "/v1/submissions/{id}/orderbook/timeline", drogon::Get);
+        ADD_METHOD_TO(Orderbook::snapshot,    "/v1/submissions/{id}/orderbook",          drogon::Get);
+        ADD_METHOD_TO(Orderbook::execQuality, "/v1/submissions/{id}/exec-quality",       drogon::Get);
     METHOD_LIST_END
 
     auto timeline(const drogon::HttpRequestPtr&,
@@ -86,7 +86,7 @@ public:
 
             nlohmann::json body;
             body["samples"] = std::move(samples);
-            cb(drogon::HttpResponse::newHttpJsonResponse(body.dump()));
+            cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(body.dump()));
         } catch (const std::exception& e) {
             cb(json_error(drogon::k502BadGateway, e.what()));
         }
@@ -112,7 +112,7 @@ public:
             // Try the exact key first — cheapest path.
             const auto exact_key = "orderbook:" + id + ":t:" + std::to_string(requested_ms);
             if (auto v = redis->get(exact_key)) {
-                cb(drogon::HttpResponse::newHttpJsonResponse(*v));
+                cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(*v));
                 return;
             }
             // Bisect via the index.
@@ -148,7 +148,7 @@ public:
             }
             const auto key = "orderbook:" + id + ":t:" + std::to_string(chosen);
             if (auto v = redis->get(key)) {
-                cb(drogon::HttpResponse::newHttpJsonResponse(*v));
+                cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(*v));
                 return;
             }
             cb(json_error(drogon::k404NotFound, "snapshot key vanished"));
@@ -175,7 +175,7 @@ public:
         try {
             const auto k = "exec_quality:" + id;
             if (auto v = redis->get(k)) {
-                cb(drogon::HttpResponse::newHttpJsonResponse(*v));
+                cb([](std::string _b){ auto _r = drogon::HttpResponse::newHttpResponse(); _r->setContentTypeCode(drogon::CT_APPLICATION_JSON); _r->setBody(_b); return _r; }(*v));
                 return;
             }
             cb(json_error(drogon::k404NotFound, "no exec-quality data yet"));
