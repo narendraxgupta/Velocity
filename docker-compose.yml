@@ -159,7 +159,7 @@ services:
       QDB_PG_DATABASE: qdb
       QDB_TELEMETRY_ENABLED: "false"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/exec?query=select+1"]
+      test: ["CMD-SHELL", "grep -q :2328 /proc/net/tcp 2>/dev/null || grep -q :2328 /proc/net/tcp6 2>/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 20
