@@ -45,11 +45,15 @@ services:
     container_name: velocity-submission-engine
     profiles: [apps]
     networks: [apps, data]
+    user: "0:0"
     ports:
       - "7001:7001"
     environment:
       VELOCITY_GRPC_PORT: 7001
+      VELOCITY_SANDBOX_BACKEND: docker
       VELOCITY_DOCKER_HOST: unix:///var/run/docker.sock
+      VELOCITY_SANDBOX_NETWORK: velocity-apps
+      VELOCITY_SANDBOX_SERVICE_PORT: 8080
       VELOCITY_REGISTRY_HOST: registry:5000
       VELOCITY_MINIO_ENDPOINT: minio:9000
       VELOCITY_MINIO_ACCESS_KEY: velocity

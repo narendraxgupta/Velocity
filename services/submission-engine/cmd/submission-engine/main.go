@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 
 	"github.com/velocity/platform/services/submission-engine/internal/builder"
 	"github.com/velocity/platform/services/submission-engine/internal/config"
+	"github.com/velocity/platform/services/submission-engine/internal/dockerengine"
 	"github.com/velocity/platform/services/submission-engine/internal/log"
 	"github.com/velocity/platform/services/submission-engine/internal/sandbox"
 	"github.com/velocity/platform/services/submission-engine/internal/server"
@@ -56,15 +58,6 @@ func main() {
 		logger.Fatalw("storage init", "err", err)
 	}
 
-	kcfg, kerr := loadK8sConfig()
-	if kerr != nil {
-		logger.Fatalw("k8s config", "err", kerr)
-	}
-	kcli, kerr := kubernetes.NewForConfig(kcfg)
-	if kerr != nil {
-		logger.Fatalw("k8s client", "err", kerr)
-	}
-
 	var rdb *redis.Client
 	if cfg.RedisAddr != "" {
 		opts, perr := redis.ParseURL(cfg.RedisAddr)
@@ -80,17 +73,54 @@ func main() {
 		}
 	}
 
-	bld := builder.NewKaniko(builder.Config{
-		K8sClient:    kcli,
-		Namespace:    cfg.SandboxNamespace,
-		RegistryHost: cfg.RegistryHost,
-		Redis:        rdb,
-	})
-	sbx := sandbox.NewGVisor(sandbox.Config{
-		K8sClient:    kcli,
-		Namespace:    cfg.SandboxNamespace,
-		RuntimeClass: cfg.SandboxRuntimeClass,
-	})
+	// Select the build/sandbox backend. "docker" targets a local daemon over
+	// the mounted socket (dev / Codespace, no cluster); "kubernetes" (default)
+	// uses Kaniko Jobs + gVisor pods. Only the k8s path loads a kubeconfig, so
+	// the engine no longer fatals on a clusterless host.
+	var (
+		bld builder.Builder
+		sbx sandbox.Sandbox
+	)
+	switch strings.ToLower(cfg.SandboxBackend) {
+	case "docker", "local":
+		eng, derr := dockerengine.New(cfg.DockerHost)
+		if derr != nil {
+			logger.Fatalw("docker client", "err", derr)
+		}
+		if perr := eng.Ping(ctx); perr != nil {
+			logger.Fatalw("docker daemon unreachable", "host", cfg.DockerHost, "err", perr)
+		}
+		logger.Infow("sandbox backend: docker",
+			"network", cfg.SandboxNetwork, "service_port", cfg.SandboxServicePort)
+		bld = builder.NewDocker(builder.DockerConfig{Engine: eng, Logger: logger})
+		sbx = sandbox.NewDocker(sandbox.DockerConfig{
+			Engine:      eng,
+			Logger:      logger,
+			Network:     cfg.SandboxNetwork,
+			ServicePort: cfg.SandboxServicePort,
+		})
+	default:
+		kcfg, kerr := loadK8sConfig()
+		if kerr != nil {
+			logger.Fatalw("k8s config", "err", kerr)
+		}
+		kcli, kerr := kubernetes.NewForConfig(kcfg)
+		if kerr != nil {
+			logger.Fatalw("k8s client", "err", kerr)
+		}
+		logger.Infow("sandbox backend: kubernetes", "namespace", cfg.SandboxNamespace)
+		bld = builder.NewKaniko(builder.Config{
+			K8sClient:    kcli,
+			Namespace:    cfg.SandboxNamespace,
+			RegistryHost: cfg.RegistryHost,
+			Redis:        rdb,
+		})
+		sbx = sandbox.NewGVisor(sandbox.Config{
+			K8sClient:    kcli,
+			Namespace:    cfg.SandboxNamespace,
+			RuntimeClass: cfg.SandboxRuntimeClass,
+		})
+	}
 
 	srv, err := server.New(cfg, server.Deps{
 		Storage: store,

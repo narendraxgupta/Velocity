@@ -50,18 +50,16 @@ TARBALL="$(mktemp --suffix=.tar)"
 WORK="$(mktemp -d)"
 cp -r "${SAMPLE_DIR}" "${WORK}/sample-exchange"
 cat > "${WORK}/Dockerfile" <<'DOCKERFILE'
-# Minimal multi-stage build of the sample matching engine. Used by the
-# smoke test only; not the canonical Dockerfile.
-FROM debian:12-slim AS build
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake ninja-build pkg-config && rm -rf /var/lib/apt/lists/*
-WORKDIR /src
-COPY sample-exchange/ ./
-RUN cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+# Smoke-test image: reuse the sample matching engine prebuilt in cpp-base.
+FROM velocity/cpp-base:builder AS build
 
-FROM debian:12-slim
-COPY --from=build /src/build/velocity-sample-exchange /usr/local/bin/exchange
-EXPOSE 8081
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libssl3 libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app/build/Release/bin/velocity-sample-exchange /usr/local/bin/exchange
+ENV EXCHANGE_PORT=8080
+EXPOSE 8080
 CMD ["/usr/local/bin/exchange"]
 DOCKERFILE
 

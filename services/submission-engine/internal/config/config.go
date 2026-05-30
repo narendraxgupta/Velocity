@@ -27,11 +27,15 @@ type Config struct {
 	MinIOUseTLS    bool
 
 	// Sandbox configuration
-	SandboxNamespace string
+	SandboxBackend      string // "kubernetes" (default) or "docker" (dev/Codespace)
+	DockerHost          string // docker daemon socket for the "docker" backend
+	SandboxNetwork      string // docker network the bot fleet shares (docker backend)
+	SandboxServicePort  uint16 // submission listen port the bots target (docker backend)
+	SandboxNamespace    string
 	SandboxRuntimeClass string // "gvisor" in production
-	DefaultCPUCores  uint32
-	DefaultMemoryMiB uint32
-	DefaultLifetime  uint32 // seconds
+	DefaultCPUCores     uint32
+	DefaultMemoryMiB    uint32
+	DefaultLifetime     uint32 // seconds
 
 	// Observability
 	OTLPEndpoint string
@@ -64,6 +68,10 @@ func Load() (*Config, error) {
 	c.MinIOBucket = optionalString("VELOCITY_MINIO_BUCKET", "submissions")
 	c.MinIOUseTLS = optionalBool("VELOCITY_MINIO_USE_TLS", false)
 
+	c.SandboxBackend = optionalString("VELOCITY_SANDBOX_BACKEND", "kubernetes")
+	c.DockerHost = optionalString("VELOCITY_DOCKER_HOST", "unix:///var/run/docker.sock")
+	c.SandboxNetwork = optionalString("VELOCITY_SANDBOX_NETWORK", "velocity-apps")
+	c.SandboxServicePort = optionalUint16("VELOCITY_SANDBOX_SERVICE_PORT", 8080)
 	c.SandboxNamespace = optionalString("VELOCITY_SANDBOX_NAMESPACE", "velocity-sandbox")
 	c.SandboxRuntimeClass = optionalString("VELOCITY_SANDBOX_RUNTIME_CLASS", "gvisor")
 	c.DefaultCPUCores = optionalUint32("VELOCITY_DEFAULT_CPU_CORES", 2)
