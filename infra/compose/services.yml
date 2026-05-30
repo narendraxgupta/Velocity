@@ -354,15 +354,23 @@ services:
       context: ../../frontend
       dockerfile: Dockerfile
       target: runtime
-      # NEXT_PUBLIC_* must be baked at build time (Next inlines them into the
-      # client bundle). For a Codespace, export the externally-reachable URLs
-      # before `compose build frontend`, e.g.:
-      #   export FRONTEND_API_URL=https://<name>-8080.app.github.dev
+      # The browser talks to the gateway SAME-ORIGIN (`/v1/*` on port 3000) and
+      # the Next server proxies to api-gateway:8080 internally — so NO cross-
+      # origin CORS preflight and the gateway port need NOT be public. This is
+      # what makes the UI work behind the GitHub Codespaces tunnel.
+      #
+      # Hence NEXT_PUBLIC_API_GATEWAY_URL defaults to EMPTY (same-origin). Only
+      # set FRONTEND_API_URL if you deliberately want the browser to call the
+      # gateway cross-origin (needs CORS + a public 8080 port).
+      #
+      # The leaderboard WebSocket still connects directly (WS can't be proxied
+      # by Next standalone). For a Codespace, export the public wss URL before
+      # `compose build frontend`:
       #   export FRONTEND_WS_URL=wss://<name>-8090.app.github.dev/v1/leaderboard
-      # They default to localhost for the plain docker-compose dev loop.
       args:
-        NEXT_PUBLIC_API_GATEWAY_URL: ${FRONTEND_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_API_GATEWAY_URL: ${FRONTEND_API_URL:-}
         NEXT_PUBLIC_LEADERBOARD_WS: ${FRONTEND_WS_URL:-ws://localhost:8090/v1/leaderboard}
+        API_GATEWAY_ORIGIN: ${API_GATEWAY_ORIGIN:-http://api-gateway:8080}
     container_name: velocity-frontend
     profiles: [apps]
     networks: [apps]
@@ -370,9 +378,11 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
-      # Kept for parity/SSR; the values that reach the browser are the
-      # build args above (NEXT_PUBLIC_* are inlined at build time).
-      NEXT_PUBLIC_API_GATEWAY_URL: ${FRONTEND_API_URL:-http://localhost:8080}
+      # Server-side (SSR) fetches hit the gateway over the internal network.
+      INTERNAL_API_GATEWAY_URL: ${API_GATEWAY_ORIGIN:-http://api-gateway:8080}
+      # Kept for parity; the values that reach the browser are the build args
+      # above (NEXT_PUBLIC_* are inlined at build time).
+      NEXT_PUBLIC_API_GATEWAY_URL: ${FRONTEND_API_URL:-}
       NEXT_PUBLIC_LEADERBOARD_WS: ${FRONTEND_WS_URL:-ws://localhost:8090/v1/leaderboard}
     depends_on:
       - api-gateway

@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { API_BASE } from '@/lib/api/base'
 import { isDemoMode, mockBenchmarkSnapshots } from '@/lib/demo-data'
 
 export type BenchmarkPhase =
@@ -102,9 +103,6 @@ type WireSnapshot = {
 }
 
 export type ConnectionState = 'connecting' | 'open' | 'closed' | 'error'
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_GATEWAY_URL ?? 'http://localhost:8080'
 
 const MAX_SAMPLES = 600   // 10 minutes at 1Hz; ample for live charts.
 

@@ -25,6 +25,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { API_BASE } from '@/lib/api/base'
 import { cn } from '@/lib/utils'
 
 type SymbolTick = {
@@ -36,7 +37,6 @@ type SymbolTick = {
 
 type Direction = 'up' | 'down' | 'flat'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_GATEWAY_URL || 'http://localhost:8080'
 const DEMO = process.env.NEXT_PUBLIC_DEMO_MODE === '1'
 
 export function MarketdataTicker() {

@@ -28,14 +28,27 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # NEXT_PUBLIC_* are inlined into the client bundle at build time, so they
-# MUST be present here (not just at runtime). When the SPA is served from a
-# different host than the gateway/leaderboard (e.g. a Codespace's *-3000 vs
-# *-8080 / *-8090 github.dev hosts), pass the externally-reachable URLs as
-# build args. They default to localhost for the plain docker-compose dev loop.
-ARG NEXT_PUBLIC_API_GATEWAY_URL=http://localhost:8080
+# MUST be present here (not just at runtime).
+#
+# NEXT_PUBLIC_API_GATEWAY_URL defaults to EMPTY on purpose: the browser then
+# calls the gateway SAME-ORIGIN (`/v1/...`) and the Next server proxies those
+# to API_GATEWAY_ORIGIN (see next.config.mjs `rewrites`). This is what makes
+# the SPA work behind the GitHub Codespaces tunnel without cross-origin CORS
+# preflights. Only set a non-empty absolute URL if you intentionally want the
+# browser to hit the gateway cross-origin.
+#
+# API_GATEWAY_ORIGIN is the internal address the Next server proxies to. It is
+# baked into the routes manifest at build time, hence it's a build arg.
+#
+# NEXT_PUBLIC_LEADERBOARD_WS is the leaderboard WebSocket URL. WS can't be
+# proxied reliably by Next standalone, so the browser connects to it directly;
+# for a Codespace pass the public wss://<name>-8090.app.github.dev/... URL.
+ARG NEXT_PUBLIC_API_GATEWAY_URL=
 ARG NEXT_PUBLIC_LEADERBOARD_WS=ws://localhost:8090/v1/leaderboard
+ARG API_GATEWAY_ORIGIN=http://api-gateway:8080
 ENV NEXT_PUBLIC_API_GATEWAY_URL=${NEXT_PUBLIC_API_GATEWAY_URL}
 ENV NEXT_PUBLIC_LEADERBOARD_WS=${NEXT_PUBLIC_LEADERBOARD_WS}
+ENV API_GATEWAY_ORIGIN=${API_GATEWAY_ORIGIN}
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -49,6 +62,10 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+# Server-side (RSC / route handlers) fetches hit the gateway directly over the
+# internal network — relative URLs aren't valid there. Overridable at runtime.
+ARG API_GATEWAY_ORIGIN=http://api-gateway:8080
+ENV INTERNAL_API_GATEWAY_URL=${API_GATEWAY_ORIGIN}
 
 # Run as non-root.
 RUN addgroup --system --gid 1001 velocity \

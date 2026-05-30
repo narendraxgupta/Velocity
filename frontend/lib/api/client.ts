@@ -14,10 +14,8 @@
  * URL), just keep using `fetch` directly.
  */
 
+import { API_BASE } from '@/lib/api/base' 
 import { getStoredToken } from '@/lib/auth/session'
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_GATEWAY_URL ?? 'http://localhost:8080'
 
 export type ApiFetchInit = RequestInit & {
   /** Override the bearer token. Useful for "preview as tenant X" flows. */
