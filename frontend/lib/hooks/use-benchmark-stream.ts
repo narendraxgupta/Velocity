@@ -149,10 +149,15 @@ export function useBenchmarkStream(benchmarkId: string | undefined) {
     }
 
     let cancelled = false
+    // Set once the run reaches a terminal phase. The gateway closes the SSE
+    // stream right after the final frame; without this we'd reconnect forever
+    // to a finished benchmark (the `stream` request storm + perpetual
+    // "error" status seen when watching a completed run).
+    let done = false
     let timer: ReturnType<typeof setTimeout> | null = null
 
     const connect = () => {
-      if (cancelled) return
+      if (cancelled || done) return
       setState('connecting')
       const url = `${API_BASE}/v1/benchmarks/${encodeURIComponent(benchmarkId)}/stream`
       const es = new EventSource(url, { withCredentials: false })
@@ -170,15 +175,26 @@ export function useBenchmarkStream(benchmarkId: string | undefined) {
           const snap = toSnapshot(wire)
           setLatest(snap)
           setHistory((prev) => trimSamples([...prev, snap]))
+          if (
+            snap.phase === 'complete' ||
+            snap.phase === 'cancelled' ||
+            snap.phase === 'failed'
+          ) {
+            done = true
+            setState('closed')
+            es.close()
+          }
         } catch {
           /* ignore malformed payloads */
         }
       }
 
       es.onerror = () => {
-        setState('error')
         es.close()
-        if (cancelled) return
+        // Run finished (or we're tearing down): don't reconnect, don't flag an
+        // error — the close is expected.
+        if (cancelled || done) return
+        setState('error')
         const delay = Math.min(reconnectAt.current, 5_000)
         reconnectAt.current = Math.min(reconnectAt.current * 2, 5_000)
         timer = setTimeout(connect, delay)

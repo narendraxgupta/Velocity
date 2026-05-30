@@ -63,8 +63,15 @@ export default function ProfilePage() {
     })
       .then(async (r) => {
         if (cancelled) return
-        if (r.status === 404) {
-          setError('No flamegraph recorded for this submission yet. Re-deploy with profiling enabled.')
+        if (r.status === 404 || r.status >= 500) {
+          // 404 = no profile recorded; 5xx = the perf-profiler sidecar that
+          // captures folded stacks isn't running here (it only attaches on the
+          // Kubernetes deploy path, not the local docker sandbox).
+          setError(
+            'No flamegraph available — the perf-profiler sidecar that records ' +
+            'CPU stacks does not run in this environment (local docker sandbox). ' +
+            'Flamegraphs are captured automatically on the Kubernetes deployment.',
+          )
           return
         }
         if (!r.ok) {

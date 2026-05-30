@@ -60,6 +60,18 @@ export function ExecQualityPanel({ submissionId }: Props) {
   useEffect(() => {
     if (!submissionId) return undefined
     let cancelled = false
+    // Give up after a bounded run of 404s so we don't poll a non-existent
+    // exec-quality blob forever (e.g. a run that produced no fills, or when the
+    // validator is offline) — that was flooding the network tab with red 404s.
+    let misses = 0
+    const MAX_MISSES = 20 // ~40s at the 2s cadence
+    let id: ReturnType<typeof setInterval> | null = null
+    const stop = () => {
+      if (id) {
+        clearInterval(id)
+        id = null
+      }
+    }
     const fetchOnce = async () => {
       try {
         const resp = await apiFetch(
@@ -67,8 +79,9 @@ export function ExecQualityPanel({ submissionId }: Props) {
           { cache: 'no-store' },
         )
         if (resp.status === 404) {
-          // No data yet — keep polling silently, this is normal early in a run.
+          // No data yet — normal early in a run. Stop quietly after a while.
           if (!cancelled) setError(null)
+          if (++misses >= MAX_MISSES) stop()
           return
         }
         if (!resp.ok) {
@@ -77,6 +90,7 @@ export function ExecQualityPanel({ submissionId }: Props) {
         }
         const body = (await resp.json()) as ExecQuality
         if (cancelled) return
+        misses = 0
         setData(body)
         setError(null)
       } catch (err) {
@@ -84,10 +98,10 @@ export function ExecQualityPanel({ submissionId }: Props) {
       }
     }
     fetchOnce()
-    const id = setInterval(fetchOnce, 2_000)
+    id = setInterval(fetchOnce, 2_000)
     return () => {
       cancelled = true
-      clearInterval(id)
+      stop()
     }
   }, [submissionId])
 

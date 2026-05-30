@@ -11,21 +11,14 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
+  // The same-origin gateway proxy lives in `app/v1/[...path]/route.ts` (a
+  // streaming route handler), NOT a `rewrites` entry — rewrites buffer
+  // responses, which breaks SSE (live benchmark + marketdata feeds). We also
+  // disable Next's response compression so it can't gzip-buffer those streams;
+  // payloads are small and this runs behind a tunnel anyway.
+  compress: false,
   experimental: {
     optimizePackageImports: ['lucide-react', 'echarts', 'echarts-for-react'],
-  },
-  // Same-origin API proxy. The browser calls `/v1/*` on its own origin (the
-  // Next server) and we forward to the gateway over the internal network. This
-  // is what lets the SPA work behind the GitHub Codespaces tunnel without
-  // cross-origin CORS preflights (which the tunnel 403s) and without making
-  // the gateway port public. The destination is resolved at BUILD time, so
-  // API_GATEWAY_ORIGIN must be present as a build arg (defaults to the
-  // docker-compose service name).
-  async rewrites() {
-    const gateway = process.env.API_GATEWAY_ORIGIN || 'http://api-gateway:8080'
-    return [
-      { source: '/v1/:path*', destination: `${gateway}/v1/:path*` },
-    ]
   },
   async headers() {
     return [

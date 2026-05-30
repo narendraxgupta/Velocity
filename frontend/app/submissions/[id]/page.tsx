@@ -50,6 +50,25 @@ import {
 
 const ADMIN_RUNS_KEY = 'velocity:admin:runs'
 
+/**
+ * Resolve the Jaeger trace URL. In a Codespace/github.dev each forwarded port
+ * is its own subdomain (`…-3000.app.github.dev`), so we derive the Jaeger UI
+ * host (`…-16686`) from the current location rather than the hardcoded
+ * `localhost:16686` that only works on a local dev box. NEXT_PUBLIC_JAEGER_URL
+ * overrides everything.
+ */
+function traceUrl(traceId: string): string {
+  const configured = process.env.NEXT_PUBLIC_JAEGER_URL
+  if (configured) return `${configured.replace(/\/$/, '')}/trace/${traceId}`
+  if (typeof window !== 'undefined') {
+    const m = window.location.host.match(/^(.*)-(\d+)(\.app\.github\.dev)$/)
+    if (m) {
+      return `${window.location.protocol}//${m[1]}-16686${m[3]}/trace/${traceId}`
+    }
+  }
+  return `http://localhost:16686/trace/${traceId}`
+}
+
 export default function SubmissionDetailPage() {
   const params = useParams<{ id: string }>()
   const routeId = params?.id ?? ''
@@ -171,7 +190,7 @@ export default function SubmissionDetailPage() {
           <PhasePill phase={latest?.phase ?? 'unspecified'} />
           {latest?.traceId && (
             <a
-              href={`${process.env.NEXT_PUBLIC_JAEGER_URL ?? 'http://localhost:16686'}/trace/${latest.traceId}`}
+              href={traceUrl(latest.traceId)}
               target="_blank"
               rel="noopener noreferrer"
               className="text-sm font-medium text-accent hover:underline"
@@ -185,12 +204,6 @@ export default function SubmissionDetailPage() {
             className="text-sm font-medium text-accent hover:underline"
           >
             View mismatches →
-          </Link>
-          <Link
-            href={`/submissions/${encodeURIComponent(submissionId || routeId)}/build`}
-            className="text-sm font-medium text-accent hover:underline"
-          >
-            Build log →
           </Link>
           <Link
             href={`/submissions/${encodeURIComponent(submissionId || routeId)}/profile`}
