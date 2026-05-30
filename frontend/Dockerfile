@@ -17,7 +17,7 @@ WORKDIR /app
 # minimum friction. Swap to pnpm/yarn by replacing this block.
 COPY package.json package-lock.json* ./
 RUN apk add --no-cache libc6-compat \
- && npm ci --omit=optional
+ && npm install --omit=optional --no-audit --no-fund
 
 # ---- Stage 2 : build --------------------------------------------------------
 FROM node:20-alpine AS builder

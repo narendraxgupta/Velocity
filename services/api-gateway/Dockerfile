@@ -20,8 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libssl3 \
       tini \
  && rm -rf /var/lib/apt/lists/* \
- && addgroup --system --gid 10001 velocity \
- && adduser  --system --uid 10001 --ingroup velocity --no-create-home velocity
+ && groupadd --system --gid 10001 velocity \
+ && useradd  --system --uid 10001 --gid veclocity velocity
 
 COPY --from=builder /app/build/Release/bin/velocity-api-gateway \
                     /usr/local/bin/velocity-api-gateway
