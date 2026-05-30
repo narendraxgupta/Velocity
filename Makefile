@@ -28,8 +28,8 @@ PROFILES_DEBUG   := --profile debug
 .PHONY: help
 help: ## Show this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "$(COLOR_BOLD)Velocity$(COLOR_OFF) — make targets\n\n"} \
-		/^[a-zA-Z_0-9-]+:.*?##/ { printf "  $(COLOR_BOLD)%-20s$(COLOR_OFF) %s\n", $$1, $$2 } \
-		/^##@/ { printf "\n$(COLOR_BOLD)%s$(COLOR_OFF)\n", substr($$0, 5) }' $(MAKEFILE_LIST)
+	/^[a-zA-Z_0-9-]+:.*?##/ { printf "  $(COLOR_BOLD)%-20s$(COLOR_OFF) %s\n", $$1, $$2 } \
+	/^##@/ { printf "\n$(COLOR_BOLD)%s$(COLOR_OFF)\n", substr($$0, 5) }' $(MAKEFILE_LIST)
 
 .PHONY: bootstrap
 bootstrap: ## One-time setup: pull base images, generate proto stubs.
@@ -88,15 +88,15 @@ proto-ensure: ## Generate proto stubs (and restore the go.mod stub) only when mi
 	@# `make build` without first running `make bootstrap`.
 	@test -f proto/gen/go/go.mod || git checkout -- proto/gen/go/go.mod 2>/dev/null || true
 	@if [ ! -f proto/gen/go/go.mod ]; then \
-		echo "→ recreating committed proto/gen/go/go.mod stub"; \
-		mkdir -p proto/gen/go; \
-		printf 'module github.com/velocity/platform/proto/gen/go\n\ngo 1.22\n\nrequire (\n\tgoogle.golang.org/grpc v1.67.1\n\tgoogle.golang.org/protobuf v1.35.1\n)\n' > proto/gen/go/go.mod; \
+	echo "→ recreating committed proto/gen/go/go.mod stub"; \
+	mkdir -p proto/gen/go; \
+	printf 'module github.com/velocity/platform/proto/gen/go\n\ngo 1.22\n\nrequire (\n\tgoogle.golang.org/grpc v1.67.1\n\tgoogle.golang.org/protobuf v1.35.1\n)\n' > proto/gen/go/go.mod; \
 	fi
 	@if [ -n "$$(find proto/gen/go -name '*.pb.go' -print -quit 2>/dev/null)" ]; then \
-		echo "$(COLOR_DIM)✓ proto stubs present$(COLOR_OFF)"; \
+	echo "$(COLOR_DIM)✓ proto stubs present$(COLOR_OFF)"; \
 	else \
-		echo "→ proto stubs missing — generating with buf"; \
-		$(MAKE) proto; \
+	echo "→ proto stubs missing — generating with buf"; \
+	$(MAKE) proto; \
 	fi
 
 .PHONY: build-cpp-base
@@ -125,7 +125,7 @@ build-frontend:
 proto: ## Regenerate protobuf stubs for C++, Go, and TypeScript.
 	@echo "→ generating C++ / Go / TS stubs from proto/"
 	docker run --rm -v "$$PWD/proto:/workspace" -w /workspace \
-		bufbuild/buf:1.45.0 generate
+	bufbuild/buf:1.45.0 generate
 
 ##@ Test
 
@@ -135,7 +135,7 @@ test: test-cpp test-go test-frontend ## Run all tests.
 .PHONY: test-cpp
 test-cpp: ## Run C++ unit tests (inside the cpp-base image).
 	docker run --rm -v "$$PWD:/app" -w /app velocity/cpp-base:builder \
-		bash -c "ctest --preset conan-release --output-on-failure"
+	bash -c "ctest --preset conan-release --output-on-failure"
 
 .PHONY: test-go
 test-go: ## Run Go unit tests.
@@ -151,7 +151,7 @@ test-frontend: ## Frontend type-check and lint.
 fmt: ## Format C++, Go, and frontend code.
 	@echo "→ clang-format C++"
 	@find services scripts cmake -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \
-		| xargs -r clang-format -i
+	| xargs -r clang-format -i
 	@echo "→ gofmt Go"
 	@cd services/submission-engine && go fmt ./...
 	@echo "→ prettier frontend"
@@ -168,15 +168,19 @@ lint: ## Lint everything.
 sample-submit: ## Build the bundled sample exchange and push it through the gateway.
 	@bash scripts/e2e-smoke.sh
 
+.PHONY: demo-reset
+demo-reset: ## Seek the correctness-validator to the live edge so the next run scores (Codespace/shared-CPU). Run before clicking "Benchmark" in the UI.
+	@bash scripts/reset-validator.sh
+
 .PHONY: bench
 bench: ## Run a baseline benchmark against the most recent submission.
 	@if [ -z "$$SUBMISSION_ID" ]; then \
-		echo "set SUBMISSION_ID=<id> first (see 'make sample-submit')"; exit 2; \
+	echo "set SUBMISSION_ID=<id> first (see 'make sample-submit')"; exit 2; \
 	fi
 	curl -fsS -X POST \
-		-H 'Content-Type: application/json' \
-		-d '{"submission_id":"'"$$SUBMISSION_ID"'","profile":"baseline"}' \
-		http://localhost:8080/v1/benchmarks
+	-H 'Content-Type: application/json' \
+	-d '{"submission_id":"'"$$SUBMISSION_ID"'","profile":"baseline"}' \
+	http://localhost:8080/v1/benchmarks
 
 ##@ Deploy
 
@@ -191,8 +195,8 @@ helm-template: ## Render the chart with default values; pipe through `kubectl ap
 .PHONY: helm-install
 helm-install: ## Install the chart against the current kube context. RELEASE=demo NAMESPACE=velocity-system override.
 	helm upgrade --install $${RELEASE:-demo} infra/helm/velocity \
-	  --create-namespace --namespace $${NAMESPACE:-velocity-system} \
-	  $${VALUES:+-f $$VALUES}
+	--create-namespace --namespace $${NAMESPACE:-velocity-system} \
+	$${VALUES:+-f $$VALUES}
 
 ##@ SDKs
 

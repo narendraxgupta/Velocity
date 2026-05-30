@@ -171,6 +171,8 @@ services:
       VELOCITY_LEADERBOARD_ZSET: leaderboard:composite
       VELOCITY_GROUP_ID: velocity-scoring
       VELOCITY_OTLP_ENDPOINT: jaeger:4317
+      VELOCITY_DEFAULT_TARGET_RPS: "1500"
+      VELOCITY_BASELINE_LATENCY_NS: "5000000"
     depends_on:
       redpanda: { condition: service_healthy }
       redis:    { condition: service_healthy }
