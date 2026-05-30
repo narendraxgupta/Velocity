@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates libssl3 tini \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --system --gid 10001 velocity \
- && useradd  --system --uid 10001 --gid veclocity velocity
+ && useradd  --system --uid 10001 --gid velocity velocity
 
 COPY --from=builder /app/build/Release/bin/velocity-bot-controller \
                     /usr/local/bin/velocity-bot-controller
