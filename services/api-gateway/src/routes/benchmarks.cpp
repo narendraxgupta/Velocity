@@ -257,8 +257,10 @@ public:
             ov->set_hold_seconds(
                 static_cast<std::uint32_t>(j.value("hold_seconds", 30)));
             ov->set_per_order_timeout_us(250'000);
-            span.set_attribute("target_rps",
-                               static_cast<std::int64_t>(ov->target_rps()));
+            span.set_attribute(
+                "target_rps",
+                std::to_string(static_cast<std::int64_t>(ov->target_rps()))
+            );
         } else {
             sreq.set_profile_name(j.value("profile", "baseline"));
         }
