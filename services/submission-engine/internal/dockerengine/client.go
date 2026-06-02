@@ -153,6 +153,16 @@ type CreateSpec struct {
 	Aliases     []string // network aliases (DNS names) on that network
 	NanoCPUs    int64    // 0 == unlimited
 	MemoryBytes int64    // 0 == unlimited
+
+	// Hardening knobs for untrusted submission code. The dev Docker backend
+	// has no syscall interception (gVisor only exists on the K8s path), so
+	// these cgroup/namespace controls are the only thing standing between a
+	// malicious submission and the host. All are 0/empty == "unset".
+	PidsLimit      int64             // cap forks/threads (fork-bomb defence)
+	ReadonlyRootfs bool              // immutable rootfs; writable dirs via Tmpfs
+	CapDrop        []string          // Linux capabilities to drop (e.g. ["ALL"])
+	SecurityOpt    []string          // e.g. ["no-new-privileges:true"]
+	Tmpfs          map[string]string // mountpoint -> mount options
 }
 
 // CreateContainer creates (but does not start) a container, returning its id.
@@ -168,6 +178,21 @@ func (c *Client) CreateContainer(ctx context.Context, spec CreateSpec) (string, 
 	}
 	if spec.MemoryBytes > 0 {
 		hostCfg["Memory"] = spec.MemoryBytes
+	}
+	if spec.PidsLimit > 0 {
+		hostCfg["PidsLimit"] = spec.PidsLimit
+	}
+	if spec.ReadonlyRootfs {
+		hostCfg["ReadonlyRootfs"] = true
+	}
+	if len(spec.CapDrop) > 0 {
+		hostCfg["CapDrop"] = spec.CapDrop
+	}
+	if len(spec.SecurityOpt) > 0 {
+		hostCfg["SecurityOpt"] = spec.SecurityOpt
+	}
+	if len(spec.Tmpfs) > 0 {
+		hostCfg["Tmpfs"] = spec.Tmpfs
 	}
 
 	payload := map[string]any{

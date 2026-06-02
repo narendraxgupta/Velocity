@@ -703,7 +703,13 @@ struct BenchmarkServiceImpl::Impl {
                                    static_cast<double>(s->profile.target_rps()));
         const double baseline_us = 30.0;
         const double p99_us = static_cast<double>(snap.p99_latency_ns()) / 1000.0;
-        const double latency_score = p99_us <= baseline_us
+        // p99 == 0 means the HdrHistogram recorded zero samples (no orders
+        // completed) — not an infinitely fast engine. Treat "no data" as no
+        // latency credit so a submission that never acks an order can't win
+        // the latency component. Mirrors scoring-service/src/scorer.cpp.
+        const double latency_score = p99_us <= 0.0
+            ? 0.0
+            : p99_us <= baseline_us
             ? 100.0
             : std::max(0.0, 100.0 - 100.0 * (p99_us - baseline_us) / baseline_us);
 
@@ -962,7 +968,10 @@ struct BenchmarkServiceImpl::Impl {
                                    static_cast<double>(s.profile.target_rps()));
         const double baseline_us = 30.0;
         const double p99_us = static_cast<double>(p99) / 1000.0;
-        const double lat_score = p99_us <= baseline_us
+        // See GetBenchmarkReport: p99 == 0 is "no samples", not zero latency.
+        const double lat_score = p99_us <= 0.0
+            ? 0.0
+            : p99_us <= baseline_us
             ? 100.0
             : std::max(0.0, 100.0 - 100.0 * (p99_us - baseline_us) / baseline_us);
         // The live snapshot does not yet aggregate microstructure violations,

@@ -32,8 +32,30 @@ spec:
           ports:
             - { name: http, containerPort: {{ .Values.apiGateway.port }} }
           env:
-            - { name: REDIS_ADDR,    value: "{{ include "velocity.redisAddr" . }}" }
-            - { name: KAFKA_BROKERS, value: "{{ include "velocity.kafkaBrokers" . }}" }
+            # The C++ gateway aborts at boot if any of these required upstreams
+            # is unset (services/api-gateway/src/main.cpp::load_config). Mirror
+            # the validated Kustomize base (infra/kubernetes/base/deployments/
+            # api-gateway.yaml). The gateway does NOT consume Kafka, so no
+            # broker var is needed here; Redis is a bare host:port (no scheme).
+            - { name: VELOCITY_HTTP_PORT,              value: "{{ .Values.apiGateway.port }}" }
+            - { name: VELOCITY_REDIS_ADDR,             value: "{{ include "velocity.redisAddr" . }}" }
+            - { name: VELOCITY_SUBMISSION_ENGINE_GRPC, value: "submission-engine.{{ $controlNs }}.svc.cluster.local:{{ .Values.submissionEngine.grpcPort }}" }
+            - { name: VELOCITY_BOT_CONTROLLER_GRPC,    value: "bot-controller.{{ $controlNs }}.svc.cluster.local:{{ .Values.botController.grpcPort }}" }
+            {{- if eq .Values.minio.mode "external" }}
+            - { name: VELOCITY_MINIO_ENDPOINT,   value: "{{ required "minio.external.endpoint required when minio.mode=external" .Values.minio.external.endpoint }}" }
+            - { name: VELOCITY_MINIO_ACCESS_KEY, value: "{{ .Values.minio.external.accessKey }}" }
+            - { name: VELOCITY_MINIO_SECRET_KEY, value: "{{ .Values.minio.external.secretKey }}" }
+            {{- else }}
+            - { name: VELOCITY_MINIO_ENDPOINT,   value: "{{ .Release.Name }}-minio.{{ .Release.Name }}-data.svc.cluster.local:9000" }
+            - { name: VELOCITY_MINIO_ACCESS_KEY, value: "velocity" }
+            - { name: VELOCITY_MINIO_SECRET_KEY, value: "velocity-dev-secret" }
+            {{- end }}
+            # Optional proxy upstreams. Point at THIS release's control namespace;
+            # the in-code default targets a literal "velocity-control" namespace
+            # that doesn't exist under a Helm release.
+            - { name: VELOCITY_CHAOS_URL,    value: "http://chaos-orchestrator.{{ $controlNs }}.svc.cluster.local:8090" }
+            - { name: VELOCITY_RECORDER_URL, value: "http://pcap-recorder.{{ $controlNs }}.svc.cluster.local:8091" }
+            - { name: VELOCITY_REPLAYER_URL, value: "http://pcap-replayer.{{ $controlNs }}.svc.cluster.local:8092" }
             - { name: VELOCITY_AUTH_REQUIRE, value: "{{ .Values.apiGateway.requireAuth }}" }
             {{- if .Values.apiGateway.jwtSecretBase64 }}
             - name: VELOCITY_JWT_HS256_SECRET_B64

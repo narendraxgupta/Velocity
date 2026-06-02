@@ -29,6 +29,19 @@ services:
       VELOCITY_MINIO_SECRET_KEY: velocity-dev-secret
       VELOCITY_OTLP_ENDPOINT: http://jaeger:4318
       VELOCITY_LOG_LEVEL: info
+      # Optional upstreams: without these the gateway falls back to the
+      # in-cluster *.svc.cluster.local DNS names (see routes/*.cpp), which
+      # don't resolve under docker-compose and 503 every adaptive-profile /
+      # audit / critique call. Point them at the compose service names.
+      VELOCITY_ANOMALY_URL: http://anomaly-detector:8095
+      VELOCITY_CRITIQUE_URL: http://critique-service:8094
+      AUDIT_LOG_URL: http://audit-log:8081
+      # Optional HS256 secret (base64url of the raw key). Leave empty for the
+      # anonymous "default" submitter dev flow; set it (export the same value
+      # in your shell, then recreate this container) to accept signed operator/
+      # admin JWTs so the operator-only pages (fleet, chaos, pcap, admin) work.
+      # require_auth stays false, so anonymous browsing is unaffected.
+      VELOCITY_JWT_HS256_SECRET_B64: ${VELOCITY_JWT_HS256_SECRET_B64:-}
     depends_on:
       redpanda:          { condition: service_healthy }
       redis:             { condition: service_healthy }

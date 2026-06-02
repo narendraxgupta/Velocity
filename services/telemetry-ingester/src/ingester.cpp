@@ -163,8 +163,12 @@ struct Ingester::Impl {
             if (it != pending.end()) {
                 const auto& p = it->second;
                 std::int64_t latency = 0;
-                if (p.intended_ts_ns > 0 && ack > p.intended_ts_ns) {
+                // Include same-nanosecond completions (ack == intended): a
+                // strict `>` dropped those samples entirely, biasing very
+                // fast paths' percentiles. Floor the recorded value at 1ns.
+                if (p.intended_ts_ns > 0 && ack >= p.intended_ts_ns) {
                     latency = ack - p.intended_ts_ns;
+                    if (latency < 1) latency = 1;
                     store.record(p.submission_id, latency);
                 }
                 // The completion carries only the final outcome/fills; the

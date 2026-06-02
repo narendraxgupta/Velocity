@@ -29,6 +29,12 @@ import (
 	"github.com/velocity/platform/services/submission-engine/internal/storage"
 )
 
+// maxUploadBytes caps a single artefact upload. Without this the Upload
+// stream was unbounded — a client could exhaust submission-engine memory /
+// MinIO disk. 1 GiB comfortably covers source tarballs and binaries while
+// still being a hard DoS ceiling.
+const maxUploadBytes int64 = 1 << 30 // 1 GiB
+
 // SubmissionHandlers implements pb.SubmissionServiceServer.
 type SubmissionHandlers struct {
 	pb.UnimplementedSubmissionServiceServer
@@ -72,7 +78,9 @@ func NewHandlers(s storage.Storage, b builder.Builder, sb sandbox.Sandbox,
 }
 
 // -----------------------------------------------------------------------------
-//  Upload — streaming inbound artefact -> MinIO.
+//
+//	Upload — streaming inbound artefact -> MinIO.
+//
 // -----------------------------------------------------------------------------
 //
 // Concurrency contract:
@@ -140,6 +148,10 @@ func (h *SubmissionHandlers) Upload(stream pb.SubmissionService_UploadServer) er
 				continue
 			}
 			data := chunk.GetData()
+			if received+int64(len(data)) > maxUploadBytes {
+				finalErr = fmt.Errorf("artefact exceeds max upload size of %d bytes", maxUploadBytes)
+				return
+			}
 			if _, werr := pw.Write(data); werr != nil {
 				finalErr = werr
 				return
@@ -217,7 +229,9 @@ func sanitizeFilename(name string) string {
 }
 
 // -----------------------------------------------------------------------------
-//  Register
+//
+//	Register
+//
 // -----------------------------------------------------------------------------
 func (h *SubmissionHandlers) Register(_ context.Context, req *pb.RegisterRequest) (
 	*pb.RegisterResponse, error) {
@@ -259,7 +273,9 @@ func (h *SubmissionHandlers) Register(_ context.Context, req *pb.RegisterRequest
 }
 
 // -----------------------------------------------------------------------------
-//  Build
+//
+//	Build
+//
 // -----------------------------------------------------------------------------
 func (h *SubmissionHandlers) Build(ctx context.Context, req *pb.BuildRequest) (
 	*pb.BuildResponse, error) {
@@ -314,7 +330,9 @@ func (h *SubmissionHandlers) Build(ctx context.Context, req *pb.BuildRequest) (
 }
 
 // -----------------------------------------------------------------------------
-//  Deploy
+//
+//	Deploy
+//
 // -----------------------------------------------------------------------------
 func (h *SubmissionHandlers) Deploy(ctx context.Context, req *pb.DeployRequest) (
 	*pb.DeployResponse, error) {
@@ -386,7 +404,9 @@ func (h *SubmissionHandlers) Deploy(ctx context.Context, req *pb.DeployRequest) 
 }
 
 // -----------------------------------------------------------------------------
-//  Teardown
+//
+//	Teardown
+//
 // -----------------------------------------------------------------------------
 func (h *SubmissionHandlers) Teardown(ctx context.Context, req *pb.TeardownRequest) (
 	*pb.TeardownResponse, error) {
@@ -394,12 +414,19 @@ func (h *SubmissionHandlers) Teardown(ctx context.Context, req *pb.TeardownReque
 	if err := h.sandbox.Teardown(ctx, id); err != nil {
 		return nil, err
 	}
+	if rec := h.get(id); rec != nil {
+		h.mu.Lock()
+		rec.phase = pb.SubmissionPhase_SUBMISSION_PHASE_TERMINATED
+		h.mu.Unlock()
+	}
 	h.broadcast(id, pb.SubmissionPhase_SUBMISSION_PHASE_TERMINATED, "")
 	return &pb.TeardownResponse{TeardownComplete: true}, nil
 }
 
 // -----------------------------------------------------------------------------
-//  WatchSubmission — stream of SubmissionStatus
+//
+//	WatchSubmission — stream of SubmissionStatus
+//
 // -----------------------------------------------------------------------------
 func (h *SubmissionHandlers) WatchSubmission(req *pb.WatchSubmissionRequest,
 	stream pb.SubmissionService_WatchSubmissionServer) error {
@@ -451,11 +478,15 @@ func (h *SubmissionHandlers) WatchSubmission(req *pb.WatchSubmissionRequest,
 }
 
 // -----------------------------------------------------------------------------
-//  GetFlamegraph — read perf-profiler sidecar output from MinIO.
+//
+//	GetFlamegraph — read perf-profiler sidecar output from MinIO.
+//
 // -----------------------------------------------------------------------------
 //
 // The perf-profiler sidecar (see sandbox.go) writes folded-stack format to
-//   flamegraphs/<submission_id>.folded.txt
+//
+//	flamegraphs/<submission_id>.folded.txt
+//
 // alongside a meta-JSON sibling carrying recording metadata. We stream the
 // folded payload back to the gateway as a single GetFlamegraphResponse; the
 // frontend uses d3-flamegraph to render an interactive SVG.
@@ -488,16 +519,16 @@ func (h *SubmissionHandlers) GetFlamegraph(ctx context.Context,
 	// The sidecar also writes a sibling meta JSON. We do a best-effort read;
 	// missing meta is non-fatal — the response just gets zero values.
 	var recordedNs uint64
-	var sampleHz uint32 = 99       // sidecar default
+	var sampleHz uint32 = 99 // sidecar default
 	var durSecs uint64
 	if metaRd, mErr := h.storage.Get(ctx,
 		fmt.Sprintf("flamegraphs/%s.meta.json", id)); mErr == nil {
 		defer metaRd.Close()
 		// Parse only the three fields we care about — keep the dep light.
 		var meta struct {
-			RecordedAtNs   uint64 `json:"recorded_at_ns"`
-			SampleFreqHz   uint32 `json:"sample_freq_hz"`
-			DurationSecs   uint64 `json:"duration_seconds"`
+			RecordedAtNs uint64 `json:"recorded_at_ns"`
+			SampleFreqHz uint32 `json:"sample_freq_hz"`
+			DurationSecs uint64 `json:"duration_seconds"`
 		}
 		if dec := json.NewDecoder(metaRd); dec != nil {
 			_ = dec.Decode(&meta)
@@ -518,7 +549,9 @@ func (h *SubmissionHandlers) GetFlamegraph(ctx context.Context,
 }
 
 // -----------------------------------------------------------------------------
-//  Helpers
+//
+//	Helpers
+//
 // -----------------------------------------------------------------------------
 func (h *SubmissionHandlers) get(id string) *submissionRecord {
 	h.mu.RLock()

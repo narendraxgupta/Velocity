@@ -10,11 +10,11 @@
 //   3. After the batch, flush QuestDB and advance `$last` only after
 //      flush succeeded.
 //
-// We keep the `$last` cursor in memory only — on restart we start at
-// "$" (newest), which means audit events emitted during a daemon
-// restart can be lost. The mitigation is "fix the daemon, don't lose
-// it again"; if loss becomes a problem we'll snapshot the cursor to
-// Redis on each successful flush.
+// The `$last` cursor is snapshotted to Redis after every successful flush
+// (redisCursorKey) so a restart resumes from where it left off instead of
+// "$" (newest), which used to silently drop every event emitted during the
+// downtime. Resume-from-cursor means events can be redelivered, so
+// processEvent dedupes on EventID to keep the hash chain intact.
 
 package consumer
 
@@ -30,15 +30,25 @@ import (
 )
 
 const (
-	redisStreamKey   = "audit:events"
-	redisReadCount   = 200
+	redisStreamKey    = "audit:events"
+	redisReadCount    = 200
 	redisBlockTimeout = 1 * time.Second
+	// redisCursorKey persists the last processed stream ID across restarts.
+	redisCursorKey = "audit:events:cursor"
+	// seenTTL bounds the idempotency markers; far longer than any realistic
+	// redelivery window while keeping the key space from growing unbounded.
+	seenTTL = 7 * 24 * time.Hour
 )
 
 // RunRedisStream is the Redis-side counterpart of Run(). Safe to launch
 // in its own goroutine.
 func (c *Consumer) RunRedisStream(ctx context.Context) error {
+	// Resume from the persisted cursor if present; "$" (only new events)
+	// on a cold start with no saved cursor.
 	lastID := "$"
+	if v, err := c.rdb.Get(ctx, redisCursorKey).Result(); err == nil && v != "" {
+		lastID = v
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -87,6 +97,10 @@ func (c *Consumer) RunRedisStream(ctx context.Context) error {
 			continue
 		}
 		lastID = batchEndID
+		// Snapshot the cursor so a restart resumes here rather than at "$".
+		if err := c.rdb.Set(ctx, redisCursorKey, lastID, 0).Err(); err != nil {
+			c.log.Warnw("failed to persist audit stream cursor; a restart may replay", "err", err)
+		}
 	}
 }
 
@@ -111,6 +125,19 @@ func (c *Consumer) processEvent(ctx context.Context, ev *event.Event) {
 	// events fork onto the same parent hash.
 	c.chainMu.Lock()
 	defer c.chainMu.Unlock()
+
+	// Idempotency guard. Resume-from-cursor (Redis) and offset replay
+	// (Kafka) can both redeliver an event after a restart; without this a
+	// redelivered event would append a duplicate QuestDB row AND fork the
+	// per-tenant hash chain. Key on the emitter-supplied ULID (Validate
+	// guarantees it's non-empty). The marker is written only AFTER the row
+	// is durable and the head advanced (below), so a crash before that
+	// leaves the event safely reprocessable. The whole block is under
+	// chainMu, so the check+set is atomic w.r.t. the other transport.
+	seenKey := "audit:seen:" + ev.EventID
+	if n, err := c.rdb.Exists(ctx, seenKey).Result(); err == nil && n > 0 {
+		return
+	}
 
 	// Pull the chain head. redis.Nil (key missing on first event for a
 	// tenant) is the bootstrap case and is NOT a drop reason — `prev`
@@ -146,6 +173,10 @@ func (c *Consumer) processEvent(ctx context.Context, ev *event.Event) {
 		c.dropped.WithLabelValues("redis_set").Inc()
 		return
 	}
+
+	// Row is durable and the head advanced — mark the event seen so a
+	// redelivery is a no-op rather than a duplicate/chain-fork.
+	_ = c.rdb.Set(ctx, seenKey, "1", seenTTL).Err()
 
 	c.ingested.WithLabelValues(ev.TenantID, string(ev.Action)).Inc()
 	lag := float64(time.Now().UnixNano()-ev.OccurredAtNs) / 1e6

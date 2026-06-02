@@ -29,7 +29,7 @@ spec:
             - { name: grpc,    containerPort: 7101 }
             - { name: metrics, containerPort: 9093 }
           env:
-            - { name: VELOCITY_LISTEN_HOST,  value: "0.0.0.0" }
+            - { name: VELOCITY_GRPC_HOST,  value: "0.0.0.0" }
             - { name: VELOCITY_GRPC_PORT,    value: "7101" }
             - { name: VELOCITY_METRICS_PORT, value: "9093" }
             - { name: VELOCITY_REDIS_ADDR,   value: "redis.velocity-data.svc.cluster.local:6379" }

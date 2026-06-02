@@ -37,16 +37,16 @@ import (
 type Deps struct {
 	K8s       kubernetes.Interface
 	Logger    *zap.SugaredLogger
-	Namespace string   // comma-separated list of allowed namespaces
+	Namespace string // comma-separated list of allowed namespaces
 }
 
 // Injector is the public type. Goroutine-safe; share between handlers.
 type Injector struct {
-	deps       Deps
-	allowedNs  map[string]struct{}
+	deps      Deps
+	allowedNs map[string]struct{}
 
-	mu       sync.Mutex
-	active   map[string]*activeInjection
+	mu     sync.Mutex
+	active map[string]*activeInjection
 }
 
 type activeInjection struct {
@@ -54,7 +54,7 @@ type activeInjection struct {
 	Pod         string
 	Namespace   string
 	ExpiresAt   time.Time
-	RevertHints map[string]string   // free-form data for revert()
+	RevertHints map[string]string // free-form data for revert()
 }
 
 // Kind enumerates the supported chaos primitives. Stable string values
@@ -63,11 +63,11 @@ type activeInjection struct {
 type Kind string
 
 const (
-	KindPodKill      Kind = "pod-kill"
-	KindTCLatency    Kind = "tc-latency"
-	KindTCLoss       Kind = "tc-loss"
-	KindCPUThrottle  Kind = "cpu-throttle"
-	KindPartition    Kind = "partition"
+	KindPodKill     Kind = "pod-kill"
+	KindTCLatency   Kind = "tc-latency"
+	KindTCLoss      Kind = "tc-loss"
+	KindCPUThrottle Kind = "cpu-throttle"
+	KindPartition   Kind = "partition"
 )
 
 const (
@@ -281,7 +281,7 @@ func (in *Injector) CPUThrottle(ctx context.Context, ns, pod string, a CPUThrott
 // ----------------------------------------------------------------------------
 
 type PartitionArgs struct {
-	Upstream string   // hostname or IP — resolved via getent inside the pod
+	Upstream string // hostname or IP — resolved via getent inside the pod
 	Duration time.Duration
 }
 
@@ -298,7 +298,10 @@ func (in *Injector) Partition(ctx context.Context, ns, pod string, a PartitionAr
 
 	script := fmt.Sprintf(
 		"ip=$(getent hosts %q | awk '{print $1; exit}'); "+
-			"if [ -z \"$ip\" ]; then echo \"chaos: cannot resolve %q\" >&2; exit 0; fi; "+
+			// Fail (exit 1) when the upstream can't be resolved: exiting 0
+			// here left the ephemeral container "Completed" so the partition
+			// looked injected while no iptables rule was ever added.
+			"if [ -z \"$ip\" ]; then echo \"chaos: cannot resolve %q\" >&2; exit 1; fi; "+
 			"iptables -A OUTPUT -d \"$ip\" -j DROP; "+
 			"sleep %d; "+
 			"iptables -D OUTPUT -d \"$ip\" -j DROP || true",

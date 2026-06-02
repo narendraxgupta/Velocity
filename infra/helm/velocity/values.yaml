@@ -42,7 +42,9 @@ submissionEngine:
   enabled: true
   replicas: 1
   image: submission-engine
-  grpcPort: 50051
+  # Must match the port the service actually listens on (VELOCITY_GRPC_PORT,
+  # default 7001) and the Kustomize base manifests — not the old 50051.
+  grpcPort: 7001
   resources:
     requests: { cpu: 250m,  memory: 256Mi }
     limits:   { cpu: 1,     memory: 1Gi   }
@@ -51,7 +53,8 @@ botController:
   enabled: true
   replicas: 1
   image: bot-controller
-  grpcPort: 50052
+  # Matches VELOCITY_GRPC_PORT and the Kustomize base (7101), not 50052.
+  grpcPort: 7101
   resources:
     requests: { cpu: 500m,  memory: 512Mi }
     limits:   { cpu: 2,     memory: 2Gi   }

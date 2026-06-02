@@ -154,16 +154,34 @@ public:
                 auto stream_sp =
                     std::shared_ptr<drogon::ResponseStream>(std::move(stream));
 
-                auto tick = [stream_sp, running, last_hb]() {
-                    if (!*running) return;
+                // Hold the repeating timer's id so we can cancel it when the
+                // client disconnects. Without this the timer fired forever for
+                // every dead SSE client (a per-connection Redis-I/O leak) —
+                // `*running=false` only short-circuited the body, never the
+                // timer. Set after runEvery() returns; the shared_ptr lets the
+                // already-registered callback see the id.
+                // trantor's TimerId is a uint64_t; use the underlying type so
+                // we don't depend on a (non-existent) drogon::TimerId alias.
+                auto timer_id = std::make_shared<std::uint64_t>(0);
+
+                auto tick = [stream_sp, running, last_hb, timer_id]() {
+                    auto* loop = drogon::app().getLoop();
+                    const auto cancel = [&]() {
+                        *running = false;
+                        stream_sp->close();
+                        if (*timer_id != 0) loop->invalidateTimer(*timer_id);
+                    };
+                    if (!*running) {
+                        if (*timer_id != 0) loop->invalidateTimer(*timer_id);
+                        return;
+                    }
                     auto* r = clients::RedisClient::get();
-                    if (!r) { stream_sp->close(); *running = false; return; }
+                    if (!r) { cancel(); return; }
                     try {
                         const auto body = build_snapshot(*r).dump();
                         const auto msg = "event: snapshot\ndata: " + body + "\n\n";
                         if (!stream_sp->send(msg)) {
-                            *running = false;
-                            stream_sp->close();
+                            cancel();
                             return;
                         }
                     } catch (...) {
@@ -172,11 +190,14 @@ public:
                     }
                     const auto now = std::chrono::steady_clock::now();
                     if (now - *last_hb > std::chrono::seconds(10)) {
-                        stream_sp->send(": heartbeat\n\n");
+                        if (!stream_sp->send(": heartbeat\n\n")) {
+                            cancel();
+                            return;
+                        }
                         *last_hb = now;
                     }
                 };
-                drogon::app().getLoop()->runEvery(0.10, tick);
+                *timer_id = drogon::app().getLoop()->runEvery(0.10, tick);
             });
         resp->setContentTypeCodeAndCustomString(drogon::CT_CUSTOM,
                                                 "text/event-stream");

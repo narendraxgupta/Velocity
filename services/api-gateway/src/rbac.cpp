@@ -82,10 +82,21 @@ const std::vector<RoutePolicy>& policies() {
             // ----- operator scope -----
             // Chaos injection touches the kernel and can affect other
             // tenants on the same node. Submitter must NOT trigger.
+            // GET /v1/chaos/status is operator-readable too so the chaos
+            // panel can poll the live injection table — without this row it
+            // fell through to the fail-closed ADMIN default and 403'd every
+            // operator polling the panel.
+            {"GET",  "/v1/chaos",                tenant::Role::OPERATOR},
             {"POST", "/v1/chaos",                tenant::Role::OPERATOR},
             {"DELETE", "/v1/chaos",              tenant::Role::OPERATOR},
-            // Pcap recording is a privacy-sensitive operation.
-            {"POST", "/v1/pcaps/record",         tenant::Role::OPERATOR},
+            // Pcap capture + replay is privacy-sensitive, so the entire
+            // /v1/pcaps and /v1/recorder surface is operator-scoped (any
+            // method). The previous single {"POST","/v1/pcaps/record"} row
+            // matched no real route — the actual endpoints are /v1/pcaps/*
+            // and /v1/recorder/* — so list/replay/state/recorder all fell
+            // through to ADMIN and 403'd the operator pcap panel.
+            {"",     "/v1/pcaps",                tenant::Role::OPERATOR},
+            {"",     "/v1/recorder",             tenant::Role::OPERATOR},
             // Fleet introspection across all tenants.
             {"GET",  "/v1/fleet",                tenant::Role::OPERATOR},
 

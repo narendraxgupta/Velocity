@@ -111,8 +111,12 @@ resource "google_container_node_pool" "sandbox" {
     machine_type = var.sandbox_pool_machine
     oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
     labels = {
-      "velocity.tier"               = "sandbox"
-      "runtime.velocity.io/sandbox" = "true"
+      "velocity.tier"              = "sandbox"
+      # Must match the gVisor RuntimeClass nodeSelector
+      # (infra/kubernetes/base/runtimeclass-gvisor.yaml). It keyed on
+      # runtime.velocity.io/gvisor, so a "...sandbox" label left sandbox
+      # pods unschedulable on GKE.
+      "runtime.velocity.io/gvisor" = "true"
     }
     taint {
       key    = "velocity.tier"

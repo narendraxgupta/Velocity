@@ -112,6 +112,10 @@ auto Server::run() -> void {
        .setLogPath("")                             // we route through spdlog
        .enableServerHeader(false)
        .setIdleConnectionTimeout(60)
+       // Bound the in-flight request body so a client can't OOM the gateway
+       // by streaming an unbounded artefact upload. Matches the 1 GiB cap the
+       // submission-engine enforces on its Upload stream.
+       .setClientMaxBodySize(1024UL * 1024UL * 1024UL)
        .registerSyncAdvice([](const drogon::HttpRequestPtr& req)
                                 -> drogon::HttpResponsePtr {
            VLOG_DEBUG("{} {}", req->methodString(), req->path());

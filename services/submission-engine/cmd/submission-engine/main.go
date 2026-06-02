@@ -94,10 +94,13 @@ func main() {
 			"network", cfg.SandboxNetwork, "service_port", cfg.SandboxServicePort)
 		bld = builder.NewDocker(builder.DockerConfig{Engine: eng, Logger: logger})
 		sbx = sandbox.NewDocker(sandbox.DockerConfig{
-			Engine:      eng,
-			Logger:      logger,
-			Network:     cfg.SandboxNetwork,
-			ServicePort: cfg.SandboxServicePort,
+			Engine:           eng,
+			Logger:           logger,
+			Network:          cfg.SandboxNetwork,
+			ServicePort:      cfg.SandboxServicePort,
+			DefaultCPUCores:  cfg.DefaultCPUCores,
+			DefaultMemoryMiB: cfg.DefaultMemoryMiB,
+			DefaultLifetime:  time.Duration(cfg.DefaultLifetime) * time.Second,
 		})
 	default:
 		kcfg, kerr := loadK8sConfig()
@@ -110,10 +113,11 @@ func main() {
 		}
 		logger.Infow("sandbox backend: kubernetes", "namespace", cfg.SandboxNamespace)
 		bld = builder.NewKaniko(builder.Config{
-			K8sClient:    kcli,
-			Namespace:    cfg.SandboxNamespace,
-			RegistryHost: cfg.RegistryHost,
-			Redis:        rdb,
+			K8sClient:        kcli,
+			Namespace:        cfg.SandboxNamespace,
+			RegistryHost:     cfg.RegistryHost,
+			RegistryInsecure: cfg.RegistryInsecure,
+			Redis:            rdb,
 		})
 		sbx = sandbox.NewGVisor(sandbox.Config{
 			K8sClient:    kcli,

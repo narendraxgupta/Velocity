@@ -36,6 +36,18 @@ locals {
     "submission-engine",
     "telemetry-ingester",
     "frontend",
+    # Auxiliary services the K8s manifests also deploy — they need ECR repos
+    # too, otherwise their `velocity/<svc>` image refs have nowhere to pull
+    # from on EKS.
+    "chaos-orchestrator",
+    "pcap-recorder",
+    "pcap-replayer",
+    "audit-log",
+    "plugin-orchestrator",
+    "critique-service",
+    "anomaly-detector",
+    "marketdata-generator",
+    "perf-profiler",
   ]
 }
 

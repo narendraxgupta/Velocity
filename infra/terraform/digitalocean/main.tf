@@ -59,8 +59,10 @@ resource "digitalocean_kubernetes_node_pool" "sandbox" {
 
   labels = {
     "velocity.tier" = "sandbox"
-    # Mark the nodes so the bot-worker DaemonSet's nodeAffinity matches.
-    "runtime.velocity.io/sandbox" = "true"
+    # Must match the gVisor RuntimeClass nodeSelector
+    # (infra/kubernetes/base/runtimeclass-gvisor.yaml: runtime.velocity.io/gvisor).
+    # A "...sandbox" label left sandbox pods unschedulable here.
+    "runtime.velocity.io/gvisor" = "true"
   }
 
   taint {

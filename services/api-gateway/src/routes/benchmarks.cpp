@@ -349,7 +349,17 @@ public:
         velocity::orchestrator::v1::BenchmarkReport gresp;
         const auto status = clients::GrpcClients::benchmark()->GetReport(&ctx, greq, &gresp);
         if (!status.ok()) {
-            cb(json_error(drogon::k404NotFound, status.error_message()));
+            // Distinguish "no such benchmark" (404) from upstream outages —
+            // previously every gRPC error (UNAVAILABLE, DEADLINE_EXCEEDED, …)
+            // was reported to the client as a misleading 404.
+            drogon::HttpStatusCode code = drogon::k502BadGateway;
+            switch (status.error_code()) {
+                case grpc::StatusCode::NOT_FOUND:         code = drogon::k404NotFound;          break;
+                case grpc::StatusCode::UNAVAILABLE:       code = drogon::k503ServiceUnavailable; break;
+                case grpc::StatusCode::DEADLINE_EXCEEDED: code = drogon::k504GatewayTimeout;     break;
+                default:                                  code = drogon::k502BadGateway;         break;
+            }
+            cb(json_error(code, status.error_message()));
             return;
         }
         nlohmann::json body{

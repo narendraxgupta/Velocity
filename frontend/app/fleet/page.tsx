@@ -13,10 +13,41 @@ import { useMemo } from 'react'
 
 import { Panel, PanelBody, PanelDescription, PanelHeader, PanelTitle } from '@/components/ui/panel'
 import { MetricCard } from '@/components/metric-card'
+import { RoleGate } from '@/components/auth/role-gate'
 import { useFleet, type Worker } from '@/lib/hooks/use-fleet'
 import { cn, formatLatencyNs, formatRelativeMs, formatRps } from '@/lib/utils'
 
+// The gateway gates GET /v1/fleet at OPERATOR (rbac.cpp), so submitters would
+// otherwise just see a perpetual 403 here. Gate the whole view on the matching
+// `fleet:read` capability and only mount the polling FleetView for operators+.
 export default function FleetPage() {
+  return (
+    <RoleGate cap="fleet:read" fallback={<FleetForbidden />}>
+      <FleetView />
+    </RoleGate>
+  )
+}
+
+function FleetForbidden() {
+  return (
+    <div className="container space-y-6 py-8">
+      <header>
+        <span className="label-eyebrow">bot fleet</span>
+        <h1 className="font-display text-2xl font-semibold tracking-tight">Fleet heatmap</h1>
+      </header>
+      <Panel>
+        <PanelBody>
+          <p className="text-sm text-muted-foreground">
+            The fleet view is restricted to operators. Sign in with an operator
+            token to inspect the live bot-worker registry.
+          </p>
+        </PanelBody>
+      </Panel>
+    </div>
+  )
+}
+
+function FleetView() {
   const { workers, updatedAt, error } = useFleet()
 
   const totals = useMemo(() => {

@@ -299,15 +299,22 @@ func (r *Replayer) loadFlows(ctx context.Context, key string) ([]flow, uint64, e
 			continue
 		}
 
-		// Heuristic for "client→server": the side with the smaller dst
-		// port (i.e. talking *to* a well-known port) is the client. The
-		// recorder's BPF filter already narrows to one port pair, so
-		// either direction works; we just need to be consistent.
-		if tcp.DstPort >= tcp.SrcPort {
+		// Heuristic for "client→server": the client talks *to* a
+		// well-known service port, which is numerically smaller than the
+		// client's own ephemeral source port (the kernel allocates these
+		// from 32768+). So a packet is client→server exactly when its
+		// destination port is the smaller of the pair. Those are the only
+		// packets we replay — the bot drives requests at the engine, and
+		// server→client responses are read back off the socket on replay.
+		//
+		// NOTE: this condition was previously `DstPort >= SrcPort`, which
+		// kept the server→client direction and dropped every actual
+		// request, so replays found "no client→server payload packets".
+		if tcp.DstPort < tcp.SrcPort {
 			// client → server (this is what we replay)
 		} else {
-			// server → client response; we'll measure latency by
-			// reading from the socket on replay, no need to replay.
+			// server → client response (or dst == src) — skip it; on
+			// replay we read the response off the socket instead.
 			continue
 		}
 
@@ -506,7 +513,7 @@ func (r *Replayer) execute(ctx context.Context, args StartArgs, flows []flow, rn
 				switch args.ClockMode {
 				case ClockModePreserve:
 					target := startWall.Add(
-						time.Duration(float64(pk.OffsetNs)/args.SpeedMultiplier))
+						time.Duration(float64(pk.OffsetNs) / args.SpeedMultiplier))
 					if err := waitCtx(ctx, time.Until(target)); err != nil {
 						return
 					}
