@@ -20,7 +20,7 @@ COPY package.json package-lock.json* ./
 # image build instead of hard-failing; the deps are still pinned by the
 # resolved tree that gets carried into the builder stage.
 RUN apk add --no-cache libc6-compat \
- && npm install --omit=optional --no-audit --no-fund
+ && npm install --no-audit --no-fund
 
 # ---- Stage 2 : build --------------------------------------------------------
 FROM node:20-alpine AS builder
