@@ -19,8 +19,8 @@ type Config struct {
 	// Image registry (push target for Kaniko-built images)
 	RegistryHost string // e.g. "registry:5000"
 	// RegistryInsecure disables registry TLS verification on the Kaniko
-	// push. Defaults true for the dev plain-HTTP registry; set false in
-	// production so image layers can't be MITM'd.
+	// push. Secure-by-default (false); set VELOCITY_REGISTRY_INSECURE=true
+	// ONLY for a plain-HTTP dev registry (e.g. a local k3d/compose registry).
 	RegistryInsecure bool
 
 	// Object storage
@@ -66,7 +66,7 @@ func Load() (*Config, error) {
 	}
 	c.MetricsPort = optionalUint16("VELOCITY_METRICS_PORT", 9092)
 	c.RegistryHost = requiredString("VELOCITY_REGISTRY_HOST", &err)
-	c.RegistryInsecure = optionalBool("VELOCITY_REGISTRY_INSECURE", true)
+	c.RegistryInsecure = optionalBool("VELOCITY_REGISTRY_INSECURE", false)
 	c.MinIOEndpoint = requiredString("VELOCITY_MINIO_ENDPOINT", &err)
 	c.MinIOAccessKey = requiredString("VELOCITY_MINIO_ACCESS_KEY", &err)
 	c.MinIOSecretKey = requiredString("VELOCITY_MINIO_SECRET_KEY", &err)

@@ -107,12 +107,15 @@ public:
         const auto submission_id = body.value("submission_id", "");
         const auto benchmark_id  = body.value("benchmark_id", "");
         auto       ttl_seconds   = body.value("ttl_seconds", DEFAULT_TTL_SECONDS);
-        // Clamp the client-supplied TTL: reject non-positive values and cap
-        // the upper bound so a caller can't pin a public share for years.
+        // Reject a non-positive TTL outright (clearer contract than silently
+        // defaulting — a bad caller gets a 400, not a surprise valid share),
+        // and cap the upper bound so a caller can't pin a public share for years.
         constexpr long long kMaxTtlSeconds = 30LL * 24 * 3600;  // 30 days
         if (ttl_seconds <= 0) {
-            ttl_seconds = DEFAULT_TTL_SECONDS;
-        } else if (static_cast<long long>(ttl_seconds) > kMaxTtlSeconds) {
+            cb(json_error(drogon::k400BadRequest, "ttl_seconds must be positive"));
+            return;
+        }
+        if (static_cast<long long>(ttl_seconds) > kMaxTtlSeconds) {
             ttl_seconds = static_cast<decltype(ttl_seconds)>(kMaxTtlSeconds);
         }
         if (submission_id.empty() || benchmark_id.empty()) {

@@ -62,10 +62,10 @@ type Config struct {
 	KanikoImage   string // default "gcr.io/kaniko-project/executor:latest"
 	JobTTLSeconds int32  // delete completed Jobs after this many seconds
 
-	// RegistryInsecure disables registry TLS verification for the push.
-	// True is correct for the dev compose registry (plain HTTP on
-	// registry:5000); production registries with TLS should set this false
-	// so a MITM cannot inject layers into a submission image.
+	// RegistryInsecure disables registry TLS verification for the Kaniko
+	// push. Secure-by-default (false) so a MITM can't inject layers into a
+	// submission image in production; enable it only for a plain-HTTP dev
+	// registry (local k3d/compose).
 	RegistryInsecure bool
 
 	// Optional Redis client for build-log fan-out. When nil the builder
