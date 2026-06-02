@@ -208,8 +208,9 @@ do.
 ### Option A — Infra only (fast, for backend/SDK dev)
 
 Brings up Redpanda, QuestDB, Redis, MinIO, registry, Prometheus,
-Grafana, Jaeger, Redpanda Console. No application services. Use this
-when you'll run an app service locally (e.g.
+Grafana, Redpanda Console. No application services. (Jaeger lives in the
+`debug` profile — add it with `docker compose --profile debug up -d jaeger`.)
+Use this when you'll run an app service locally (e.g.
 `go run ./services/submission-engine`).
 
 ```powershell
@@ -316,10 +317,11 @@ This runs `scripts/e2e-smoke.sh`, which:
 2. Tars up `scripts/sample-exchange` (the bundled reference matching
    engine) into a Dockerfile context.
 3. `POST /v1/submissions` → uploads the artefact, MinIO stores it.
-4. `POST /v1/submissions/{id}/build` → submission-engine triggers
-   Kaniko, pushes the image to the local registry.
+4. `POST /v1/submissions/{id}/build` → submission-engine builds the image
+   (Docker builder on the local compose backend; Kaniko on Kubernetes) and
+   pushes it to the local registry.
 5. `POST /v1/submissions/{id}/deploy` → submission-engine launches the
-   sandbox pod.
+   sandbox (a hardened Docker container locally; a gVisor pod on Kubernetes).
 6. `POST /v1/benchmarks { profile: baseline }` → bot-controller fans
    out load.
 7. Waits 15 s, `POST /v1/benchmarks/{id}/cancel`, sleeps 3 s for

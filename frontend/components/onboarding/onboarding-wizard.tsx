@@ -64,7 +64,7 @@ const STEPS: Step[] = [
         <ol className="ml-4 list-decimal space-y-1.5 text-sm">
           <li>
             <a
-              href="https://github.com/velocity-platform/sample-matching-engine"
+              href="https://github.com/narendraxgupta/Velocity/tree/main/scripts/sample-exchange"
               target="_blank"
               rel="noopener noreferrer"
               className="text-accent hover:underline"
@@ -83,7 +83,7 @@ const STEPS: Step[] = [
     ),
     cta: {
       label: 'Open template repo →',
-      href: 'https://github.com/velocity-platform/sample-matching-engine',
+      href: 'https://github.com/narendraxgupta/Velocity/tree/main/scripts/sample-exchange',
     },
   },
   {

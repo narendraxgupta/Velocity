@@ -42,7 +42,7 @@ export function Hero() {
             <ArrowRight className="h-4 w-4" />
           </Link>
           <Link
-            href="https://github.com/velocity/platform/blob/main/docs/architecture.md"
+            href="https://github.com/narendraxgupta/Velocity/blob/main/docs/architecture.md"
             className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-surface-elevated"
           >
             <BookOpen className="h-4 w-4" />

@@ -53,9 +53,12 @@ If the server slows down so that `actual_ts > intended_ts`, we record the
 calculation. This way, when the server catches up, every backed-up request
 is correctly attributed to the slow window.
 
-The bots schedule sends with a **deadline-driven scheduler** built on
-`io_uring`'s timeout opcodes; we do not use `sleep()` (which has its own
-quantization issues).
+The bots drive this with a **deadline-driven reactor** that advances a
+monotonic intended-send-time cursor and waits on each deadline with a hybrid
+sleep-then-spin (coarse `sleep_for` down to a slack threshold, then a short
+busy spin for the final microseconds) to beat plain `sleep()`'s quantization.
+(`io_uring` is linked for a future timer-opcode path, but the current scheduler
+is the sleep/spin reactor in `bot-fleet/worker/src/reactor.cpp`.)
 
 ## Consequences
 
@@ -64,16 +67,18 @@ quantization issues).
 - **Honest p99**. Our numbers match (or exceed in pessimism) what Gil's
   HdrHistogram philosophy demands.
 - **Backpressure is observable, not hidden.** If the bot can't keep up with
-  its own intended schedule, we emit a metric
-  (`velocity_bot_schedule_skew_us`) instead of silently slowing down.
+  its own intended schedule, the reactor tracks the schedule skew internally
+  (`Reactor::skew_ns()`) instead of silently slowing down. (Exporting it as a
+  Prometheus metric — e.g. `velocity_bot_schedule_skew_us` — is a follow-up.)
 
 ### Bad
 
 - **The bot worker can fall behind the submission.** If the submission is
-  fast and the bot is on a slow node, the bot's send queue grows. We cap
-  this growth at 64k pending requests, after which we drop with a metric.
-  Drops invalidate the benchmark for that worker (the controller reports
-  the situation in the final BenchmarkReport).
+  fast and the bot is on a slow node, work backs up. The per-reactor telemetry
+  publish ring to Redpanda is bounded (default 65,536 events,
+  `VELOCITY_PUBLISH_BUFFER_CAPACITY`); on overflow it drops with a metric
+  (`velocity_telemetry_dropped_total`). A high drop rate flags that the worker
+  is the bottleneck, which the controller surfaces in the final BenchmarkReport.
 - **Tuning matters.** `target_rps` is a *scheduled* rate, not an *achieved*
   rate. Setting target too high means we measure the bot's failure, not
   the submission's. The bot publishes its own utilization so operators
@@ -84,9 +89,10 @@ quantization issues).
 ### "Just record the raw latency and add a correction post hoc"
 
 HdrHistogram supports `recordValueWithExpectedInterval()` which extrapolates
-the missing samples. We use this **in addition** for cross-checking, but the
-primary signal is the open-loop send schedule because extrapolation is a
-weaker approximation than measuring the right thing in the first place.
+the missing samples. We deliberately **do not** rely on it: the primary (and
+current) signal is the open-loop intended-send-time, because measuring the
+right thing beats extrapolating a weaker post-hoc approximation. The ingester
+records `ack - intended_ts_ns` directly.
 
 ### Use `wrk2` / `hey -c -d` style runners
 

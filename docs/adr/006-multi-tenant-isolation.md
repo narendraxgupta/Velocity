@@ -33,20 +33,23 @@ The constraints are:
 Three-layer scheme:
 
 1. **Identity**: HS256 JWT in `Authorization: Bearer …`. Claims:
-   `tid`, `sub`, `role`, `iat`, `exp`. Verified by the api-gateway and
-   every Go service via `services/common-go/tenant`. The secret is
-   shared (one cluster = one IdP), not per-tenant. Tokens are minted by
-   `scripts/tenant.sh` for the IICPC demo path; production will swap in
-   an OIDC issuer later (Phase 4.2 hook is already in place).
-2. **Logical scoping in shared data plane** — every Redis key, Kafka
-   topic, MinIO object path is prefixed:
+   `tid`, `sub`, `role`, `iat`, `exp`. Verified today at the **api-gateway**
+   (`tenant.cpp`); the `services/common-go/tenant` helper exists for the Go
+   services to adopt but is not yet imported by them. The secret is shared
+   (one cluster = one IdP), not per-tenant. Tokens are minted by
+   `scripts/tenant.sh` for the IICPC demo path; swapping in an OIDC/JWKS
+   issuer (RS256) is planned for Phase 4.2 — not yet implemented.
+2. **Logical scoping in shared data plane** — the design is that every Redis
+   key, Kafka topic, and MinIO object path is tenant-prefixed:
    - Redis : `t:<tid>:<original>`
    - Kafka : `t.<tid>.<original>`
    - MinIO : `t/<tid>/<original>`
-   The helpers in `api_gateway/tenant.h` (C++) and
-   `services/common-go/tenant` (Go) are idempotent — calling
-   `ScopedKey` twice doesn't double-prefix, which lets us migrate one
-   service at a time.
+   Idempotent helpers exist (`scoped_key` / `scoped_topic` / `scoped_object`
+   in `api-gateway/src/tenant.cpp`, C++; `services/common-go/tenant`, Go) so a
+   prefix can't double-apply and services can migrate one at a time.
+   **Status:** these helpers are not yet called from the gateway routes — today
+   most keys/topics (e.g. `leaderboard:composite`, `telemetry.raw`) remain
+   global. Per-tenant enforcement on the data plane is still in progress.
 3. **Physical scoping in compute plane** — each tenant gets a
    Kubernetes namespace `velocity-tenant-<tid>` with:
    - `ResourceQuota` (CPU, memory, ephemeral-storage, pod count)
@@ -54,8 +57,10 @@ Three-layer scheme:
    - Default-deny NetworkPolicy + targeted allow-rules to
      `velocity-data` and `velocity-control`
    - Pod Security Standard `restricted` enforced
-   Sandbox pods (untrusted submission code) run in this namespace under
-   the gVisor runtime class.
+   This per-tenant namespace is what the plugin orchestrator targets. Note:
+   submission sandbox pods currently default to a shared `velocity-sandbox`
+   namespace (`VELOCITY_SANDBOX_NAMESPACE`) under the gVisor runtime class —
+   not `velocity-tenant-<tid>` — unless configured per tenant.
 
 ## Consequences
 

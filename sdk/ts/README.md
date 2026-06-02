@@ -1,5 +1,9 @@
 # Velocity TypeScript SDK
 
+> **Preview:** not yet integration-tested against the gateway — verify
+> request/response shapes against `services/api-gateway/src/routes/*` and
+> `proto/`. See `sdk/README.md` for the full caveat.
+
 ```bash
 npm install @velocity/sdk
 ```

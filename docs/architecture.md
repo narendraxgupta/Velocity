@@ -2,8 +2,10 @@
 
 This document is the **single source of truth** for how Velocity is structured.
 It is written for engineers who will operate, extend, or audit the platform —
-not for marketing. Every claim in here is implemented in code; every diagram
-matches the running system.
+not for marketing. It describes the intended **production** design; where the
+current implementation differs (e.g. the local Docker dev backend vs the
+Kubernetes/gVisor path, or features still in progress), the code is the
+authority and those cases are flagged.
 
 ---
 
@@ -49,7 +51,7 @@ flowchart LR
         API["API Gateway (C++)"]
         Engine["Submission Engine (Go)"]
         Sandbox["Sandbox (gVisor + cgroups)"]
-        Bots["Bot Fleet (C++ + io_uring)"]
+        Bots["Bot Fleet (C++ reactors)"]
         Pipe["Telemetry + Validator (C++)"]
         Score["Scoring + Leaderboard (C++)"]
     end
@@ -79,9 +81,10 @@ flowchart LR
 | `api-gateway` | C++20 / Drogon | ~2k | 2 vCPU / 512MB | Yes — public HTTP/WS ingress |
 | `submission-engine` | Go 1.22 | ~3k | 1 vCPU / 256MB | No — control plane |
 | `bot-fleet/controller` | C++20 / gRPC | ~1.5k | 2 vCPU / 256MB | No — fan-out only |
-| `bot-fleet/worker` | C++20 / io_uring / uWS | ~4k | N vCPU / 1GB each | **Yes** — load generator |
+| `bot-fleet/worker` | C++20 / uWS + FIX + libcurl | ~4k | N vCPU / 1GB each | **Yes** — load generator |
 | `telemetry-ingester` | C++20 / librdkafka | ~2.5k | 2 vCPU / 1GB | **Yes** — consumes events |
 | `correctness-validator` | C++20 / Boost.Intrusive | ~3k | 2 vCPU / 2GB | Yes — replays orderbook |
+| `scoring-service` | C++20 / librdkafka + Redis | ~1k | 1 vCPU / 256MB | Yes — joins latency + correctness → composite, writes leaderboard |
 | `leaderboard-ws` | C++20 / uWebSockets | ~1k | 1 vCPU / 256MB | Yes — broadcast |
 | `frontend` | TS / Next.js 14 | ~3k | 1 vCPU / 512MB | No |
 
@@ -89,8 +92,10 @@ flowchart LR
 
 Constrained per submission:
 
-- **CPU**: 2 dedicated cores via `cpu-manager-policy=static`.
-- **Memory**: 512 MiB hard cap (OOM-killed if exceeded).
+- **CPU**: 2 cores via the pod's CPU request/limit. (Dedicated-core pinning via
+  `cpu-manager-policy=static` is planned hardening, not yet enabled.)
+- **Memory**: hard cap from the deploy request — defaults 512 MiB on the Docker
+  dev backend, 1 GiB on Kubernetes (OOM-killed if exceeded).
 - **Ephemeral storage**: 1 GiB tmpfs at `/tmp`.
 - **Network**: ingress only from `velocity-bot-fleet/*`, no egress.
 - **Filesystem**: read-only root, `tmpfs` for `/tmp` and `/var/log`.
@@ -143,6 +148,7 @@ sequenceDiagram
     participant K as Redpanda
     participant I as Telemetry Ingester
     participant CV as Correctness Validator
+    participant SC as Scoring Service
     participant Q as QuestDB
     participant R as Redis
     participant LB as Leaderboard WS
@@ -157,16 +163,18 @@ sequenceDiagram
     par Telemetry
         K->>I: consume OrderEvent[]
         I->>I: HdrHistogram::recordValue
-        I->>Q: ILP UDP append (latency_us, …)
-        I->>R: ZADD leaderboard score
-        R-->>LB: PUBLISH leaderboard.updates
-        LB-->>A: WS push (relayed)
+        I->>Q: ILP TCP append (latency_us, …)
+        I->>K: publish LatencyBucket (metrics.latency.1s)
     and Correctness
         K->>CV: consume OrderEvent[]
         CV->>CV: replay reference orderbook
-        CV->>Q: ILP UDP append (fills, violations)
-        CV->>R: ZADD correctness:<sub_id>
+        CV->>K: publish CorrectnessReport (telemetry.fills)
+        CV->>R: orderbook + mismatch snapshots
     end
+    K->>SC: consume LatencyBucket + CorrectnessReport
+    SC->>R: ZADD leaderboard:composite + HSET scores:<id>
+    R-->>LB: PUBLISH leaderboard.global
+    LB-->>A: WS push (relayed)
 ```
 
 ### 4.3 Live UI subscription
@@ -178,14 +186,14 @@ sequenceDiagram
     participant L as Leaderboard WS
     participant R as Redis
 
-    B->>L: WS GET /ws (subscribe leaderboard)
-    L->>R: SUBSCRIBE leaderboard.updates
-    R-->>L: pub message
+    B->>L: WS /v1/leaderboard (subscribe leaderboard)
+    L->>R: PSUBSCRIBE leaderboard.*
+    R-->>L: pub message (leaderboard.global)
     L-->>B: LeaderboardDelta frame
-    B->>A: HTTP GET /v1/benchmarks/<id>/snapshot
-    A-->>B: BenchmarkSnapshot
-    B->>A: WS /v1/benchmarks/<id>/stream
-    A-->>B: BenchmarkSnapshot frames @ 4Hz
+    B->>A: HTTP GET /v1/benchmarks/<id>
+    A-->>B: BenchmarkReport
+    B->>A: SSE GET /v1/benchmarks/<id>/stream
+    A-->>B: BenchmarkSnapshot frames @ ~4Hz
 ```
 
 ---
@@ -204,26 +212,27 @@ sequenceDiagram
 
 ### 5.2 Concurrency
 
-- **C++ services** use a **per-core thread model**, pinned with
-  `pthread_setaffinity_np`. Each thread runs its own io_uring (worker) or
-  event loop (API gateway), with **shared state via SPSC ring buffers**
-  (no shared mutexes on the hot path).
+- **C++ services** use a **per-core thread model**. Each thread runs its own
+  reactor (bot worker) or event loop (API gateway / leaderboard-ws), with
+  **shared state via SPSC ring buffers** (no shared mutexes on the hot path).
+  (CPU pinning via `pthread_setaffinity_np` is planned, not yet enabled.)
 - **Cross-service** ordering is provided by Redpanda partitions keyed on
   `submission_id` — all events for one submission land on one partition,
   consumed by one ingester worker. Sequential consistency per submission.
 
 ### 5.3 Backpressure
 
-- **Bot → Redpanda**: bounded local buffer (default 64k events). On overflow,
-  events are *dropped with metric* rather than blocking the io_uring loop.
-  The metric (`velocity_telemetry_dropped_total`) is a benchmark-quality
+- **Bot → Redpanda**: bounded local buffer (default 64k events per reactor). On
+  overflow, events are *dropped with metric* rather than blocking the reactor
+  loop. The metric (`velocity_telemetry_dropped_total`) is a benchmark-quality
   signal — a high drop rate indicates we are bottlenecked on ourselves and
   must scale workers.
 - **Redpanda → Ingester**: standard consumer group, lag visible in
   Grafana. Consumer scales horizontally; partition count is the ceiling.
-- **Validator → QuestDB**: ILP over UDP is fire-and-forget. We accept
-  occasional packet loss in exchange for never blocking the validator's hot
-  path. QuestDB's WAL recovers gracefully from gaps.
+- **Ingester → QuestDB**: ILP over **TCP** (UDP ingestion was removed in
+  QuestDB 7+). The telemetry-ingester is the only writer to QuestDB; the
+  correctness-validator publishes fills to Redpanda (`telemetry.fills`) and
+  writes orderbook/mismatch snapshots to Redis — it does not write QuestDB.
 
 ### 5.4 Failure modes & isolation
 
@@ -231,7 +240,7 @@ sequenceDiagram
 |---------|-----------|----------|
 | Submission code crashes | K8s pod CrashLoopBackoff | Mark submission `CRASHED`; cancel running benchmark; -50 penalty |
 | Submission OOM | OOMKilled event | Mark `OOM_KILLED`; -25 penalty; teardown |
-| Bot worker dies | gRPC stream EOF | Controller rebalances load across survivors; benchmark continues with reduced RPS noted in report |
+| Bot worker dies | gRPC stream EOF | Benchmark continues on the surviving workers at reduced RPS (automatic load rebalancing across survivors is planned, not yet implemented) |
 | Ingester lag | Consumer group lag > 5s | Page on call; benchmark may continue, scores degrade gracefully |
 | Validator slow | Stage timeout | Validator restarts with checkpoint; only correctness score affected |
 | Redpanda broker down | health probe | (Production) leader re-election. (Dev) single-broker, no recovery — restart compose |
@@ -246,8 +255,10 @@ Three pillars:
   encodes the full HDR payload as a buckets vector.
 - **Traces** — A small hand-written W3C trace-context library with an
   OTLP/HTTP batch exporter to Jaeger. Every benchmark carries a
-  `traceparent` end-to-end so a run can be followed
-  gateway → controller → worker → ingester → leaderboard.
+  `traceparent` across the **control path** so a run can be followed
+  gateway → controller → worker. (The Kafka-consuming services —
+  ingester/scoring/validator — expose Prometheus metrics rather than spans
+  and are intentionally not on the trace; see `docs/tracing.md`.)
 - **Logs** — Structured JSON via `spdlog` with a custom JSON sink.
   Stdout/stderr → Docker JSON log driver → (production) Loki.
 

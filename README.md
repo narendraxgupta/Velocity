@@ -17,8 +17,9 @@ gateways, and any other low-latency trading component against an adversarial,
 microsecond-honest load profile.
 
 Submit a binary, Dockerfile, or source archive. Velocity sandboxes the artefact
-with **gVisor**, pins it to dedicated CPU cores, and bombards it with a
-distributed fleet of **C++ bots driving `io_uring`**. Every order is timestamped
+(gVisor on Kubernetes; a hardened Docker sandbox locally), gives it dedicated
+CPU resources, and bombards it with a distributed fleet of **C++ bots driving
+`io_uring`**. Every order is timestamped
 at nanosecond resolution, every fill is replayed against a **reference
 matching engine** for correctness, and a **live leaderboard** ranks each
 submission on latency, throughput, and price-time-priority accuracy.
@@ -43,10 +44,10 @@ Velocity refuses to do any of that.
 - **Open-loop load with intended-send-time correction** — measurements are defensible.
 - **`HdrHistogram`** for percentile aggregation — mergeable, accurate to five significant figures.
 - **`clock_gettime(CLOCK_MONOTONIC_RAW)`** timing — immune to NTP slewing and `adjtimex`.
-- **`io_uring`** in the bot workers — the load generator is never the bottleneck.
-- **gVisor sandbox** — untrusted submission code cannot reach the host kernel.
-- **Per-core thread pinning + isolated CPUs** — measurements are reproducible.
-- **W3C trace context end-to-end** — every benchmark is one Jaeger trace.
+- **Hand-rolled REST / WebSocket / FIX transports** in the bot workers — the load generator is never the bottleneck.
+- **gVisor sandbox** (on Kubernetes; local dev uses a hardened Docker sandbox) — untrusted submission code cannot reach the host kernel.
+- **Per-core reactor threads** — measurements are reproducible.
+- **W3C trace context across the control path** — gateway → controller → worker is one Jaeger trace.
 
 ## Architecture
 
@@ -178,7 +179,8 @@ platform/
 
 ```bash
 make bootstrap          # one-time setup: pull base images, generate protobuf code
-make up                 # start the full dev stack (Redpanda + QuestDB + Redis + MinIO + services)
+make build              # build the shared C++ base image + all service images
+make up-apps            # start the full stack (infra + all application services)
 make logs               # tail logs from every service
 make sample-submit      # submit the bundled C++ reference exchange as a test artefact
 make bench              # run a benchmark against the test submission
@@ -206,7 +208,7 @@ C++ services (`io_uring`, gVisor), builds and runs in the cloud. Pick a
 
 1. **Edit code on your host in any IDE.** The repository sits on your host filesystem.
 2. **Builds and tests run in Linux containers.** `make build` invokes Conan + CMake inside a Linux image with `io_uring`, gVisor, and all native deps preinstalled.
-3. **The live dev stack runs in Docker Compose.** Hot-reload for the frontend; rebuild-on-save for C++ services via `make watch`.
+3. **The live dev stack runs in Docker Compose.** Hot-reload for the frontend; rebuild C++ services with `make build` (or a single one, e.g. `make build-api`).
 
 Why this split? Because `io_uring`, gVisor, `pthread_setaffinity_np`, and
 `CLOCK_MONOTONIC_RAW` do not exist on macOS or Windows. The production target
@@ -220,7 +222,7 @@ sequenceDiagram
     participant U as Submitter
     participant A as API Gateway
     participant S as Submission Engine
-    participant V as gVisor Pod (Submission Code)
+    participant V as Sandbox (Submission Code)
     participant C as Bot Controller
     participant W as Bot Workers (×N)
     participant K as Redpanda
@@ -228,10 +230,10 @@ sequenceDiagram
     participant R as Redis
     participant F as Frontend
 
-    U->>A: POST /submissions (binary + manifest)
-    A->>S: gRPC StartBuild
-    S->>S: Kaniko build → OCI image
-    S->>V: Launch gVisor pod (CPU-pinned, 4 GiB cap)
+    U->>A: POST /v1/submissions (artefact upload)
+    A->>S: register + trigger build (HTTP)
+    S->>S: build OCI image (Docker locally / Kaniko on K8s)
+    S->>V: Launch sandbox (hardened Docker container locally / gVisor pod on K8s)
     S-->>A: SubmissionReady{endpoint}
     A->>C: gRPC StartBenchmark{submission_id, profile}
     C->>W: gRPC stream Start{ramp, profile}
@@ -242,8 +244,9 @@ sequenceDiagram
     end
     K->>I: consume batch
     I->>I: HdrHistogram::recordValue
-    I->>R: ZADD leaderboard:current score
-    R->>F: PUBLISH leaderboard.updates
+    I->>K: publish LatencyBucket (scoring-service joins latency + correctness)
+    K->>R: scoring-service ZADD leaderboard:composite
+    R->>F: PUBLISH leaderboard.global (relayed by leaderboard-ws)
     F-->>U: WebSocket push (live rank)
 ```
 
@@ -252,13 +255,13 @@ sequenceDiagram
 The composite score is a weighted blend of three sub-scores:
 
 $$
-\text{score} = 0.40 \cdot s_{\text{throughput}} + 0.35 \cdot s_{\text{latency}} + 0.25 \cdot s_{\text{correctness}}
+\text{score} = 0.40 \cdot s_{\text{throughput}} + 0.35 \cdot s_{\text{latency}} + 0.25 \cdot s_{\text{correctness}} - P
 $$
 
-Each sub-score is in `[0, 100]`. The latency component uses **p99** (not p50)
-because tail latency is what matters in trading. See
-[`docs/scoring.md`](docs/scoring.md) for the full rubric, penalties, and
-tie-breakers.
+Each sub-score is in `[0, 100]` and `P` is the correctness penalty term. The
+latency component uses **p99** (not p50) because tail latency is what matters in
+trading. See [`docs/scoring.md`](docs/scoring.md) for the full rubric and the
+penalty breakdown.
 
 ## Engineering decisions worth defending
 

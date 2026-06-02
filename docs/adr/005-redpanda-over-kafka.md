@@ -21,9 +21,10 @@ are not using it directly.
 
 ## Decision
 
-We use **Redpanda 24.x**. It speaks the Kafka wire protocol so all our client
-libraries (`librdkafka` in C++, `franz-go` in Go, `kafkajs` in TypeScript) work
-unchanged.
+We use **Redpanda 24.x**. It speaks the Kafka wire protocol, so our existing
+Kafka client libraries (`librdkafka` in C++, `franz-go` in Go) work unchanged —
+and any standard Kafka client (e.g. `kafkajs`) would too if a TypeScript
+consumer is added later.
 
 ## Consequences
 

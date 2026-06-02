@@ -49,9 +49,10 @@ C++ has no perf benefit:
 
 - **Zero GC pauses** on the hot path. Latency measurements reflect the
   submission's behaviour, not our internal scheduling.
-- **Allocator control** — we use `tcmalloc` everywhere and protobuf arena
-  allocation in the worker, so the publish path is allocation-free per
-  message after warm-up.
+- **Allocator control** — protobuf arena allocation in the worker keeps the
+  publish path allocation-free per message after warm-up. (Swapping the system
+  allocator for `tcmalloc`/`jemalloc` is a drop-in tuning step if profiling
+  calls for it; it is not wired into the build today.)
 - **`io_uring` is available** with first-class Linux syscall access — Go's
   `net` package would need significant CGo glue.
 - **`pthread_setaffinity_np` + `sched_setscheduler(SCHED_FIFO)`** are

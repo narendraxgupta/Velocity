@@ -5,9 +5,11 @@
 
 ## What this provisions
 
-- **VPC** — three AZs, three subnet tiers: `private` for the control-plane
-  workloads, `public` for NAT + load balancers, `intra` for the gVisor
-  sandbox node group (no internet egress).
+- **VPC** — three AZs, three subnet tiers: `private` (NAT-routed) for the
+  control-plane **and** sandbox node groups, `public` for NAT + load balancers,
+  and a reserved NAT-free `intra` tier. (Sandbox **nodes** sit in `private` so
+  they can bootstrap and pull from ECR; sandbox **pod** egress is blocked at the
+  NetworkPolicy layer, not by subnet — see Notes.)
 - **EKS cluster** with KMS-encrypted secrets, IRSA, and control-plane logs
   shipped to CloudWatch.
 - Two **managed node groups**:
@@ -78,8 +80,11 @@ kubectl apply -k ../kubernetes/overlays/prod
   `storage.googleapis.com/gvisor/releases` rather than building it from
   source. For an air-gapped deployment, mirror the tarball into your
   internal artifact store and override `local.sandbox_bootstrap_userdata`.
-- Sandbox subnets are `intra` — they have no NAT gateway route. Submission
-  pods can talk to the in-cluster services (Redis, Redpanda, validators)
-  but not the public internet. This is intentional.
+- Sandbox **nodes** run in the NAT-routed `private` subnets (so the node
+  bootstrap can fetch `runsc` and pull images from ECR). Untrusted submission
+  **pods** are cut off from the public internet not by the subnet but by the
+  default-deny NetworkPolicy in the `velocity-sandbox` namespace
+  (`infra/kubernetes/base/networkpolicy-sandbox.yaml`); they can still reach
+  in-cluster services (Redis, Redpanda, validators). This is intentional.
 - For prod we recommend toggling `cluster_endpoint_public_access` off and
   reaching the API server only through the VPN / Tailscale / Session Mgr.

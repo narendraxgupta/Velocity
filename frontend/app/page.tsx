@@ -125,31 +125,31 @@ export default function HomePage() {
             no="001"
             title="gVisor over Firecracker"
             summary="User-space syscall interception keeps submission code from reaching the host kernel."
-            href="https://github.com/velocity/platform/blob/main/docs/adr/001-gvisor-over-firecracker.md"
+            href="https://github.com/narendraxgupta/Velocity/blob/main/docs/adr/001-gvisor-over-firecracker.md"
           />
           <DecisionCard
             no="002"
             title="C++ on the hot path"
             summary="No GC pauses, allocator control, io_uring everywhere it counts."
-            href="https://github.com/velocity/platform/blob/main/docs/adr/002-cpp-on-the-hot-path.md"
+            href="https://github.com/narendraxgupta/Velocity/blob/main/docs/adr/002-cpp-on-the-hot-path.md"
           />
           <DecisionCard
             no="003"
             title="QuestDB over TimescaleDB"
             summary="ILP TCP writes at multi-million rows/sec — the right choice for telemetry ingest."
-            href="https://github.com/velocity/platform/blob/main/docs/adr/003-questdb-over-timescale.md"
+            href="https://github.com/narendraxgupta/Velocity/blob/main/docs/adr/003-questdb-over-timescale.md"
           />
           <DecisionCard
             no="004"
             title="Coordinated Omission correction"
             summary="Open-loop load with intended-send-time accounting. Honest tail latency."
-            href="https://github.com/velocity/platform/blob/main/docs/adr/004-coordinated-omission.md"
+            href="https://github.com/narendraxgupta/Velocity/blob/main/docs/adr/004-coordinated-omission.md"
           />
           <DecisionCard
             no="005"
             title="Redpanda over Kafka"
             summary="Kafka wire protocol without the JVM — lower P99, simpler ops."
-            href="https://github.com/velocity/platform/blob/main/docs/adr/005-redpanda-over-kafka.md"
+            href="https://github.com/narendraxgupta/Velocity/blob/main/docs/adr/005-redpanda-over-kafka.md"
           />
           <Panel className="flex flex-col justify-between bg-gradient-radial">
             <PanelBody className="space-y-3 py-5">
@@ -160,7 +160,7 @@ export default function HomePage() {
             </PanelBody>
             <PanelBody className="border-t border-border-subtle py-3">
               <Link
-                href="https://github.com/velocity/platform/blob/main/docs/architecture.md"
+                href="https://github.com/narendraxgupta/Velocity/blob/main/docs/architecture.md"
                 className="text-sm font-medium text-accent hover:underline"
               >
                 Open blueprint →

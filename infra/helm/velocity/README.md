@@ -64,7 +64,13 @@ ingress:
 
 ### Minimal demo (Compose-like dev cluster)
 
-Defaults already work for `kind`/`minikube`:
+> **Heads-up:** this chart is still being brought to parity with the Kustomize
+> base. Its generic service template currently injects only `REDIS_ADDR` /
+> `KAFKA_BROKERS`, whereas the C++/Go services read `VELOCITY_*` env vars (and
+> the submission-engine needs an in-cluster registry), so a bare `helm install`
+> will not yet bring every service up cleanly. For a known-good local deploy,
+> use the Kustomize dev overlay (`infra/kubernetes/overlays/dev`) or Docker
+> Compose (`make up-apps`). Helm chart parity is tracked as a follow-up.
 
 ```bash
 helm install demo ./infra/helm/velocity --create-namespace -n velocity-system
