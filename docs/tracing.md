@@ -58,7 +58,7 @@ small and our binaries fast.
 ## Running it locally
 
 ```bash
-make compose-up                              # apps profile
+make up-apps                              # infra + application services
 docker compose --profile debug up -d jaeger  # add the collector
 open http://localhost:16686                  # Jaeger UI
 ```

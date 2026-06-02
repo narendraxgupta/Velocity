@@ -38,10 +38,9 @@ options…** and pick:
 # 1. (auto-run on create) one-time bootstrap — re-run if it didn't finish:
 make bootstrap
 
-# 2. build all service images (15–30 min cold; skip the heavy LLM bits):
-docker compose --profile apps build \
-  $(docker compose config --services | grep -E 'ollama|critique-service' | sed 's/^/--scale /;s/$/=0/')
-# ...or simply: make build
+# 2. build all service images (15–30 min cold):
+make build
+# (equivalently: docker compose --profile apps build)
 
 # 3. start the stack WITHOUT Ollama (saves a ~5 GB model download + RAM):
 docker compose --profile default up -d

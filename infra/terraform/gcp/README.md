@@ -28,7 +28,10 @@ terraform plan  -var-file=env/dev.tfvars -var="project_id=$PROJECT_ID"
 terraform apply -var-file=env/dev.tfvars -var="project_id=$PROJECT_ID"
 
 gcloud container clusters get-credentials velocity-dev --region us-central1
-helm install velocity ./infra/helm/velocity -f env/dev.values.yaml
+# Deploy with the Kustomize overlay (recommended today) or Helm with your own
+# overrides file (see infra/helm/velocity/README.md — there is no bundled
+# env/dev.values.yaml):
+kubectl apply -k ../../kubernetes/overlays/prod
 ```
 
 ## Notes

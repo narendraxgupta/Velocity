@@ -10,21 +10,23 @@
 - **VPC** (one per environment).
 - **DOKS cluster** with two node pools:
   - `system` (general-purpose `s-4vcpu-8gb`) for the control plane.
-  - `sandbox` (CPU-optimised `c2-8vcpu-16gb`) for bot-worker and
-    untrusted submission pods. The pool is auto-scaling.
+  - `sandbox` (CPU-optimised `c-8`, per `var.sandbox_pool_node_size`) for
+    bot-worker and untrusted submission pods. The pool is auto-scaling.
 - **Spaces bucket** for submission artefacts (S3-compatible — point
   Velocity's MinIO config at it).
 - **Container registry** (one repository, immutable tags).
-- **Optional Postgres** for an external QuestDB swap (not currently
-  used by Velocity but reserved for future Phase 4 work).
+
+> A managed Postgres (for an external QuestDB swap) is reserved for future
+> Phase 4 work but is **not** provisioned by this module yet.
 
 ## Usage
 
 ```bash
 cd infra/terraform/digitalocean/
 
-# One-time per DO project.
-./bootstrap.sh
+# One-time per DO project: create the Spaces bucket that holds tfstate
+# (via the DO console or `doctl`/`s3cmd`). There is no bootstrap.sh here —
+# the bucket is referenced directly by the backend-config below.
 
 # Per env.
 terraform init \
@@ -40,7 +42,10 @@ terraform apply -var-file=env/dev.tfvars
 
 # Wire kubectl + apply manifests.
 doctl kubernetes cluster kubeconfig save velocity-dev
-helm install velocity ./infra/helm/velocity -f env/dev.values.yaml
+# Deploy with the Kustomize overlay (recommended today) or Helm with your own
+# overrides file (see infra/helm/velocity/README.md — there is no bundled
+# env/dev.values.yaml):
+kubectl apply -k ../../kubernetes/overlays/prod
 ```
 
 ## Why DigitalOcean, given we have AWS already?

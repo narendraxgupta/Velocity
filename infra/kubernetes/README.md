@@ -34,11 +34,14 @@ k3d cluster create velocity \
     --port "8080:80@loadbalancer" \
     --port "9000:9000@loadbalancer"
 
-# Install gVisor on each node (DaemonSet that drops `runsc` into the
-# containerd runtime config — see infra/kubernetes/base/runtimeclass-gvisor.yaml).
+# Install gVisor (runsc) on each node and register a containerd runtime
+# handler named "runsc". The base RuntimeClass
+# (infra/kubernetes/base/runtimeclass-gvisor.yaml) references that handler.
+# NOTE: an automated installer DaemonSet is planned but not yet in this repo —
+# install runsc on the nodes manually (or via Terraform node user-data).
 
-# Apply the dev overlay:
-kubectl apply -k overlays/dev
+# Apply the dev overlay (run from the repo root):
+kubectl apply -k infra/kubernetes/overlays/dev
 ```
 
 ## Apply to a managed cluster
@@ -50,14 +53,16 @@ The `prod` overlay assumes:
 - A storage class capable of provisioning 100 GiB+ SSDs for QuestDB.
 
 ```bash
-# Provision the cluster with Terraform first (see infra/terraform/), then:
-kubectl apply -k overlays/prod
+# Provision the cluster with Terraform first (see infra/terraform/), then
+# from the repo root:
+kubectl apply -k infra/kubernetes/overlays/prod
 ```
 
 ## Conventions
 
-- Every service Deployment gets a `PriorityClass`: bots > ingester > frontend,
-  so we shed UI updates before we shed measurements.
+- Intended convention (planned — not yet in these manifests): service
+  Deployments carry a `PriorityClass` ordered bots > ingester > frontend, so we
+  shed UI updates before we shed measurements.
 - Every sandbox Pod is created in `velocity-sandbox` with
   `runtimeClassName: gvisor`. The base `NetworkPolicy` denies all egress
   from that namespace and admits ingress only from `velocity-load`.

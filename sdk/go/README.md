@@ -2,8 +2,12 @@
 
 A small, hand-written wrapper around Velocity's HTTP + gRPC contracts.
 Targets the same `/v1/...` surface a browser would hit, plus the
-streaming endpoints (benchmark watch, leaderboard) over Server-Sent
-Events.
+streaming endpoints (benchmark stream at `/v1/benchmarks/{id}/stream`,
+leaderboard) over Server-Sent Events.
+
+> **Preview:** not yet integration-tested against the gateway — verify
+> request/response shapes against `services/api-gateway/src/routes/*` and
+> `proto/`. See `sdk/README.md` for the full caveat.
 
 ## Install
 

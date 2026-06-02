@@ -5,6 +5,14 @@ Source-of-truth wire contracts live in `proto/`. The SDKs wrap those
 contracts in language-idiomatic clients so callers don't have to
 hand-roll fetch+JSON.
 
+> **Status: preview.** These SDKs are not yet integration-tested against a
+> running gateway — some method names, request/response shapes, and the
+> streaming path may drift from the live API (e.g. the benchmark stream is
+> `GET /v1/benchmarks/{id}/stream`). The **authoritative** contract is the
+> api-gateway REST surface (`services/api-gateway/src/routes/*`) and the
+> protobufs in `proto/`; treat the snippets below as a starting point and
+> verify against those.
+
 | Language   | Path           | Registry                                            |
 |------------|----------------|-----------------------------------------------------|
 | Go         | `sdk/go/`      | Imported direct from this repo at a tag             |

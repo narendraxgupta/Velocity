@@ -24,17 +24,24 @@ cannot sustain peak load is a liability. The weighting reflects the priority
 order: throughput → latency → correctness, with correctness as a near-veto via
 penalties.
 
-The final ranking key in Redis is `composite_score` to 4 decimal places; ties
-break on raw p99 (lower wins), then on submission timestamp (earlier wins).
+The ranking key is the `composite_score` held in the Redis sorted set
+`leaderboard:composite` (read back highest-first via `ZREVRANGE`). Ties are
+currently resolved by Redis's default ordering within an equal score; explicit
+p99 / submission-timestamp tie-breaks are not yet implemented.
 
 ---
 
 ## 2. Throughput Score
 
-Let `target_rps` be the headline RPS for the benchmark profile and
-`sustained_rps` be the **p10 of the 1-second TPS samples** during the hold
-phase (we use p10, not mean, because what matters is the *worst* sustained
-throughput, not the average).
+Let `target_rps` be the headline RPS target and `sustained_rps` be the
+**p10 of the 1-second TPS samples** (we use p10, not mean, because what matters
+is the *worst* sustained throughput, not the average). The bot-controller's
+final benchmark report computes this p10 over the HOLD phase specifically; the
+live scoring-service computes a rolling p10 over recent 1-second samples.
+
+> Note: the live scoring-service currently scores against a single configured
+> `target_rps` (`VELOCITY_DEFAULT_TARGET_RPS`), not the per-profile target —
+> see §7.
 
 $$
 S_{\text{throughput}} =
@@ -51,8 +58,10 @@ doesn't beat one that handles 1×. They're both "fast enough."
 We use **p99 latency** because tail latency is what hurts in trading. p50 is
 trivia.
 
-Let `p99_us` be the observed p99 latency (microseconds) over the hold phase,
-computed from the merged `HdrHistogram` across all bot workers.
+Let `p99_us` be the observed p99 latency (microseconds), taken from the
+per-second `LatencyBucket` the telemetry-ingester emits — an `HdrHistogram`
+merged across all bot workers for that window. The live scoring-service scores
+from the latest bucket; the controller's final report uses the hold-phase p99.
 Let `baseline_us` be the platform's measured *self-latency* — the latency
 between two of our own services with no submission in the loop. This is
 typically ~30 µs.
@@ -81,7 +90,9 @@ and produces three counts per submission:
 
 - `expected_fills`  — what the reference book would have filled
 - `actual_fills`    — what the submission claimed to fill
-- `correct_fills`   — fills present in both with matching `(price, quantity, taker, maker)`
+- `correct_fills`   — orders whose aggregate reported fill (quantity **and**
+  notional) matches the reference book's fills for that order (per-leg
+  taker/maker identity is not compared on the current wire format)
 
 $$
 S_{\text{correctness}} = 100 \cdot \frac{\text{correct\_fills}}{\max(1, \text{expected\_fills})}
@@ -94,28 +105,35 @@ fill penalty** is for (§5).
 
 The validator additionally tracks structural violations:
 
-| Violation | Definition | Penalty point cost |
-|-----------|------------|--------------------|
-| **Price violation** | Reported fill price is *better* than the best book price at the time | 5 each |
-| **Priority violation** | At the same price level, a later order filled before an earlier one | 3 each |
-| **Phantom fill** | Reported a fill with no corresponding pair of orders | 5 each |
-| **Missing fill** | Should have filled but did not (after generous timeout) | 2 each |
-| **Self-cross** | Filled an order against the same client's other order | 10 each |
+| Violation | Definition | Penalty point cost | Status |
+|-----------|------------|--------------------|--------|
+| **Price violation** | Reported fill quantity/notional doesn't match the reference book's fills for that order | 5 each | Implemented |
+| **Phantom fill** | Submission reported a fill the reference book did not produce | 5 each | Implemented |
+| **Missing fill** | Reference book filled but the submission did not (after a generous timeout) | 2 each | Implemented |
+| **Priority violation** | At the same price level, a later order filled before an earlier one | 3 each | Penalty weight defined; **detection not yet wired** (needs per-maker fill ordering from a future OrderEvent format) — currently evaluates to 0 |
+| **Self-cross** | Filled an order against the same client's other order | 10 each | **Not yet implemented** in the scorer |
 
 These accumulate into the penalty term `P` (capped at 50 points total to avoid
-crushing the entire score on a single broken edge case).
+crushing the entire score on a single broken edge case). The implemented terms
+are computed in `services/scoring-service/src/scorer.cpp::compute_penalty()`.
 
 ---
 
 ## 5. Penalties
 
 ```text
-P = min(50,   penalty_from_violations
-            + penalty_from_lifecycle
-            + penalty_from_resource_breach)
+P = min(50,   penalty_from_violations          # implemented today
+            + penalty_from_lifecycle           # design intent — see note
+            + penalty_from_resource_breach)    # design intent — see note
 ```
 
-### Lifecycle penalties
+> **Implementation status:** the scoring-service today computes only
+> `penalty_from_violations` (price + phantom + missing; priority/self-cross as
+> noted in §4). The lifecycle and resource-breach tables below are the intended
+> design — the submission-engine detects OOM/crash/health events but does not
+> yet feed them into the scorer's penalty, so they currently contribute 0.
+
+### Lifecycle penalties (planned)
 
 | Event | Points |
 |-------|--------|
@@ -124,7 +142,7 @@ P = min(50,   penalty_from_violations
 | Health probe failed at start | Disqualified |
 | Health probe failed mid-run | 15 |
 
-### Resource breach penalties
+### Resource breach penalties (planned)
 
 | Event | Points |
 |-------|--------|
@@ -151,19 +169,26 @@ what an SRE would call the "service level objective" view of throughput.
 ## 7. Benchmark profiles
 
 The benchmark profile selected at `StartBenchmark` time determines
-`target_rps`, ramp, hold, persona mix, and per-order timeout. Default
-profiles live in `infra/profiles/`:
+`target_rps`, ramp, hold, persona mix, and per-order timeout. Profiles are
+defined in code, in `resolve_profile()` in
+`services/bot-fleet/controller/src/benchmark_service.cpp`:
 
-- **`baseline.yaml`** — 50k target, 30s hold, mostly market makers.
-- **`spike.yaml`** — 200k target, 5s ramp, mixed personas, tests burst handling.
-- **`fire-hose.yaml`** — 1M target, 60s hold, intentionally over-provisioned
+- **`baseline`** — 50k target, 30s hold, mostly market makers.
+- **`spike`** — 200k target, short ramp, mixed personas, tests burst handling.
+- **`fire-hose`** — 1M target, long hold, intentionally over-provisioned
   load to find the breaking point.
-- **`adversarial.yaml`** — Heavy spoofer + canceller mix, tests cancel-path
+- **`adversarial`** — Heavy spoofer + canceller mix, tests cancel-path
   performance specifically.
 
-The leaderboard composite score is the **mean of the composite scores across
-all four profiles** weighted equally. This prevents over-fitting to one
-workload.
+Each benchmark run scores a single profile; a leaderboard entry reflects the
+most recent scored run for that submission. (A cross-profile aggregate score is
+a planned enhancement, not current behavior.)
+
+> The live scoring-service normalizes throughput against
+> `VELOCITY_DEFAULT_TARGET_RPS` (a single configured value) rather than each
+> profile's own `target_rps`. On a single-box/Codespace dev stack this is
+> overridden in `infra/compose/services.yml` (`VELOCITY_DEFAULT_TARGET_RPS=1500`,
+> `VELOCITY_BASELINE_LATENCY_NS=5000000`) so an HTTP engine scores sensibly.
 
 ---
 
