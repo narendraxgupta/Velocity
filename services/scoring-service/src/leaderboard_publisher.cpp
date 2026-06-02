@@ -105,6 +105,10 @@ auto LeaderboardPublisher::publish_delta(
             {"sustained_rps",     s.sustained_rps},
             {"p50_ns",            s.p50_ns},
             {"p99_ns",            s.p99_ns},
+            // p999 is consumed by the anomaly-detector's IsolationForest as a
+            // tail-latency feature (see services/anomaly-detector app.py); it
+            // was previously absent from the delta so that feature read 0.
+            {"p999_ns",           s.p999_ns},
             {"updated_at_ns",     s.updated_at_ns},
         });
     }

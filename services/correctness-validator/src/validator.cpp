@@ -203,7 +203,12 @@ auto reconcile(SubmissionState& s,
         ++s.price_violations;
         return MismatchKind::PRICE;
     }
-    ++s.correct_fills;
+    // The aggregate reported fill matches the reference book's fills for
+    // this order. `expected_fills` is counted per reference fill (an order
+    // can sweep N maker levels), so credit `correct_fills` by the same N —
+    // counting it as a single fill made a perfectly-correct sweep score
+    // reference.size()/1, i.e. correctness ≈ 1/N instead of 100%.
+    s.correct_fills += reference.size();
     return MismatchKind::NONE;
 }
 

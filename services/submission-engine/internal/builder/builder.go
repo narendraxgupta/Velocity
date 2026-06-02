@@ -62,6 +62,12 @@ type Config struct {
 	KanikoImage   string // default "gcr.io/kaniko-project/executor:latest"
 	JobTTLSeconds int32  // delete completed Jobs after this many seconds
 
+	// RegistryInsecure disables registry TLS verification for the Kaniko
+	// push. Secure-by-default (false) so a MITM can't inject layers into a
+	// submission image in production; enable it only for a plain-HTTP dev
+	// registry (local k3d/compose).
+	RegistryInsecure bool
+
 	// Optional Redis client for build-log fan-out. When nil the builder
 	// runs identically — logs are simply not surfaced to the gateway.
 	Redis *redis.Client
@@ -106,10 +112,15 @@ func (b *kanikoBuilder) Build(ctx context.Context, req Request) (*Result, error)
 	args := []string{
 		"--context", "tar://" + req.ArtefactPresign,
 		"--destination", imageRef,
-		"--insecure", "--skip-tls-verify",
 		"--snapshot-mode=redo",
 		"--cache=true",
 		"--cache-ttl=24h",
+	}
+	// Disable registry TLS verification only when explicitly allowed (the
+	// dev registry is plain HTTP). Defaults on for dev compat; prod sets
+	// VELOCITY_REGISTRY_INSECURE=false to require a verified TLS push.
+	if b.cfg.RegistryInsecure {
+		args = append(args, "--insecure", "--skip-tls-verify")
 	}
 
 	job := &batchv1.Job{

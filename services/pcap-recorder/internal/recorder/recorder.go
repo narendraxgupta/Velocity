@@ -237,6 +237,19 @@ func (r *Recorder) Stop(ctx context.Context, benchmarkID string) (objectKey stri
 	pcapPath := fmt.Sprintf("/tmp/%s.pcap", benchmarkID)
 	objectKey = fmt.Sprintf("pcaps/%s.pcap", benchmarkID)
 
+	// Stop tcpdump and wait for it to flush + close the capture file BEFORE
+	// we read it. Previously we `cat`-ed and uploaded the pcap first and
+	// SIGINT-ed tcpdump afterwards — so the object landing in MinIO could be
+	// truncated/incomplete (tcpdump was still buffering), which the replayer
+	// then rejected as "no client→server payload packets". SIGINT makes
+	// tcpdump flush and exit; poll the pid until it's gone (bounded ~5s).
+	_ = r.execStream(ctx, s.Namespace, s.Pod, s.Container,
+		[]string{"/bin/sh", "-c",
+			"PID=$(cat /tmp/tcpdump.pid 2>/dev/null); " +
+				"if [ -n \"$PID\" ]; then kill -INT \"$PID\" 2>/dev/null || true; " +
+				"for i in $(seq 1 50); do kill -0 \"$PID\" 2>/dev/null || break; sleep 0.1; done; fi"},
+		nil, io.Discard, io.Discard)
+
 	// Pipe `cat <pcapPath>` from the ephemeral container into a pipe that
 	// MinIO consumes.
 	pr, pw := io.Pipe()
@@ -258,12 +271,6 @@ func (r *Recorder) Stop(ctx context.Context, benchmarkID string) (objectKey stri
 	if putErr != nil {
 		return "", 0, fmt.Errorf("stream pcap: %w", putErr)
 	}
-
-	// Best-effort: SIGINT tcpdump so it flushes cleanly. We don't care if
-	// this fails — the file is already in MinIO.
-	_ = r.execStream(ctx, s.Namespace, s.Pod, s.Container,
-		[]string{"/bin/sh", "-c", "kill -INT $(cat /tmp/tcpdump.pid) 2>/dev/null || true"},
-		nil, io.Discard, io.Discard)
 
 	// Stat for the size; non-fatal if it fails (S3 backends sometimes
 	// race on the read-your-write here).

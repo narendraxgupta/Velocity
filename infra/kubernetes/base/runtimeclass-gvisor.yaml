@@ -18,6 +18,29 @@ handler: runsc
 scheduling:
   nodeSelector:
     runtime.velocity.io/gvisor: "true"
+  # The sandbox node group is tainted NoSchedule so that ONLY gVisor
+  # workloads land there. K8s automatically merges these tolerations into
+  # every pod that sets runtimeClassName: gvisor — without them the sandbox
+  # pods match the nodeSelector but are rejected by the taint and stay
+  # Pending forever. We tolerate every cloud's sandbox taint; a toleration
+  # for a taint that isn't present on a node is simply a no-op, so listing
+  # all three is safe on any single provider.
+  #   - AWS EKS  : runtime.velocity.io/gvisor=true   (infra/terraform/node-groups.tf)
+  #   - GCP/DO   : velocity.tier=sandbox             (infra/terraform/{gcp,digitalocean})
+  #   - GKE Sandbox auto-taint: sandbox.gke.io/runtime=gvisor
+  tolerations:
+    - key: runtime.velocity.io/gvisor
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+    - key: velocity.tier
+      operator: Equal
+      value: sandbox
+      effect: NoSchedule
+    - key: sandbox.gke.io/runtime
+      operator: Equal
+      value: gvisor
+      effect: NoSchedule
 overhead:
   podFixed:
     cpu: 50m

@@ -225,7 +225,21 @@ public:
 
         velocity::orchestrator::v1::SubmissionStatus snap;
         if (!reader->Read(&snap)) {
-            cb(json_error(drogon::k404NotFound, "no such submission"));
+            // Read can fail because the submission genuinely doesn't exist
+            // (clean stream end / NOT_FOUND → 404) OR because the engine is
+            // down/slow. Inspect the final status so an outage isn't reported
+            // to the client as a misleading 404.
+            const auto status = reader->Finish();
+            drogon::HttpStatusCode code = drogon::k404NotFound;
+            switch (status.error_code()) {
+                case grpc::StatusCode::OK:
+                case grpc::StatusCode::NOT_FOUND:         code = drogon::k404NotFound;          break;
+                case grpc::StatusCode::UNAVAILABLE:       code = drogon::k503ServiceUnavailable; break;
+                case grpc::StatusCode::DEADLINE_EXCEEDED: code = drogon::k504GatewayTimeout;     break;
+                default:                                  code = drogon::k502BadGateway;         break;
+            }
+            cb(json_error(code, status.ok() ? "no such submission"
+                                            : status.error_message()));
             return;
         }
         ctx.TryCancel();

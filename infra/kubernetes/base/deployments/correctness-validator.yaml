@@ -35,7 +35,7 @@ spec:
             - { name: VELOCITY_QUESTDB_HOST,     value: "questdb.velocity-data.svc.cluster.local" }
             - { name: VELOCITY_QUESTDB_ILP_PORT, value: "9009" }
             - { name: VELOCITY_REDIS_ADDR,       value: "redis.velocity-data.svc.cluster.local:6379" }
-            - { name: VELOCITY_MISMATCHES_CAP,   value: "1000" }
+            - { name: VELOCITY_VALIDATOR_MISMATCHES_CAP,   value: "1000" }
             - { name: VELOCITY_METRICS_PORT,     value: "9096" }
           readinessProbe: { tcpSocket: { port: metrics }, periodSeconds: 5 }
           resources:

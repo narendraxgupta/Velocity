@@ -308,16 +308,24 @@ export default function SubmissionDetailPage() {
 
       {report?.cliff && <CliffCard cliff={report.cliff} />}
 
-      <RegressionBadge submissionId={submissionId || routeId} />
+      {/*
+        These panels fetch by submission id on mount. For a benchmark-rooted
+        route (/submissions/BM-…) the real submission id only arrives once the
+        report resolves, so pass the resolved `submissionId` (empty until then)
+        rather than `submissionId || routeId` — the latter fired requests at
+        the BENCHMARK id (/v1/submissions/BM-…/…) and 404'd. Each panel no-ops
+        on an empty id.
+      */}
+      <RegressionBadge submissionId={submissionId} />
 
-      <AdaptiveNextRun submissionId={submissionId || routeId} report={report} />
+      <AdaptiveNextRun submissionId={submissionId} report={report} />
 
       <VenueBreakdown
         venues={report?.venues}
         crossVenueSkewNs={report?.cross_venue_skew_ns}
       />
 
-      <ExecQualityPanel submissionId={submissionId || routeId} />
+      <ExecQualityPanel submissionId={submissionId} />
 
       <CritiquePanel
         context={

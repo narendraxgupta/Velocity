@@ -158,10 +158,22 @@ auto configuration() noexcept -> const Config& { return g_config; }
 auto resolve(const drogon::HttpRequestPtr& req) -> std::optional<Context> {
     const auto path = req->path();
     if (bypass_path(path)) {
-        Context ctx;
-        ctx.id      = "default";
-        ctx.role    = Role::SUBMITTER;
-        return ctx;
+        // The `/v1/share/` bypass exists ONLY for the public GET view —
+        // the unguessable URL token IS the authentication for that path.
+        // A revoke (DELETE /v1/share/{token}) must still resolve the
+        // caller's real tenant so ownership can be enforced; otherwise the
+        // bypass handed every revoke the anonymous "default" identity,
+        // which both blocked real owners from revoking their own shares
+        // (owner tid != "default") and let anyone revoke "default"-owned
+        // shares. So for a non-GET share request, fall through to the JWT /
+        // header / fallback resolution below instead of bypassing.
+        const bool share_path = path.starts_with("/v1/share/");
+        if (!share_path || req->method() == drogon::Get) {
+            Context ctx;
+            ctx.id      = "default";
+            ctx.role    = Role::SUBMITTER;
+            return ctx;
+        }
     }
 
     // 1) JWT path.

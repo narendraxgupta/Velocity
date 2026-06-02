@@ -14,16 +14,16 @@
 */}}
 
 {{- $services := list
-    (dict "key" "submissionEngine"   "name" "submission-engine"   "port" 50051 "portName" "grpc")
-    (dict "key" "botController"      "name" "bot-controller"      "port" 50052 "portName" "grpc")
+    (dict "key" "submissionEngine"   "name" "submission-engine"   "port" 7001 "portName" "grpc")
+    (dict "key" "botController"      "name" "bot-controller"      "port" 7101 "portName" "grpc")
     (dict "key" "telemetryIngester"  "name" "telemetry-ingester"  "port" 8087  "portName" "http")
     (dict "key" "correctnessValidator" "name" "correctness-validator" "port" 8088 "portName" "http")
     (dict "key" "scoringService"     "name" "scoring-service"     "port" 8089 "portName" "http")
     (dict "key" "leaderboardWS"      "name" "leaderboard-ws"      "port" 8090 "portName" "http")
     (dict "key" "frontend"           "name" "frontend"            "port" 3000 "portName" "http")
-    (dict "key" "chaosOrchestrator"  "name" "chaos-orchestrator"  "port" 8091 "portName" "http")
-    (dict "key" "pcapRecorder"       "name" "pcap-recorder"       "port" 8092 "portName" "http")
-    (dict "key" "pcapReplayer"       "name" "pcap-replayer"       "port" 8093 "portName" "http")
+    (dict "key" "chaosOrchestrator"  "name" "chaos-orchestrator"  "port" 8090 "portName" "http")
+    (dict "key" "pcapRecorder"       "name" "pcap-recorder"       "port" 8091 "portName" "http")
+    (dict "key" "pcapReplayer"       "name" "pcap-replayer"       "port" 8092 "portName" "http")
     (dict "key" "marketdataGenerator" "name" "marketdata-generator" "port" 8093 "portName" "http")
     (dict "key" "critiqueService"    "name" "critique-service"    "port" 8094 "portName" "http")
     (dict "key" "anomalyDetector"    "name" "anomaly-detector"    "port" 8095 "portName" "http")

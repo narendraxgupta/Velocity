@@ -59,6 +59,38 @@ jobs:
           - service: frontend
             dockerfile: frontend/Dockerfile
             context: frontend
+          # Auxiliary services that the K8s manifests reference but that were
+          # previously never built/pushed (→ ImagePullBackOff in prod). The Go
+          # microservices with their own go.mod build from their service dir;
+          # chaos-orchestrator's Dockerfile COPYs services/... so it needs the
+          # repo root as context.
+          - service: chaos-orchestrator
+            dockerfile: services/chaos-orchestrator/Dockerfile
+            context: .
+          - service: pcap-recorder
+            dockerfile: services/pcap-recorder/Dockerfile
+            context: services/pcap-recorder
+          - service: pcap-replayer
+            dockerfile: services/pcap-replayer/Dockerfile
+            context: services/pcap-replayer
+          - service: audit-log
+            dockerfile: services/audit-log/Dockerfile
+            context: services/audit-log
+          - service: plugin-orchestrator
+            dockerfile: services/plugin-orchestrator/Dockerfile
+            context: services/plugin-orchestrator
+          - service: critique-service
+            dockerfile: services/critique-service/Dockerfile
+            context: services/critique-service
+          - service: anomaly-detector
+            dockerfile: services/anomaly-detector/Dockerfile
+            context: services/anomaly-detector
+          - service: marketdata-generator
+            dockerfile: services/marketdata-generator/Dockerfile
+            context: services/marketdata-generator
+          - service: perf-profiler
+            dockerfile: services/perf-profiler/Dockerfile
+            context: services/perf-profiler
     steps:
       - uses: actions/checkout@v4
         with:

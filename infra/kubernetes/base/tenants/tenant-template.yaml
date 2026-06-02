@@ -117,6 +117,6 @@ spec:
         - protocol: TCP
           port: 8080   # api-gateway
         - protocol: TCP
-          port: 50051  # submission-engine grpc
+          port: 7001   # submission-engine grpc (matches base manifests)
         - protocol: TCP
-          port: 50052  # bot-controller grpc
+          port: 7101   # bot-controller grpc (matches base manifests)

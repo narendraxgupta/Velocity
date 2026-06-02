@@ -81,7 +81,7 @@ pnpm-debug.log*
 .pnpm/
 .eslintcache
 .stylelintcache
-.tsbuildinfo
+*.tsbuildinfo
 next-env.d.ts
 
 # ----- IDEs ------------------------------------------------------------------
