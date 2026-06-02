@@ -20,12 +20,27 @@ jobs:
   smoke:
     name: docker-compose smoke
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    # Building the C++ base image (Conan/Boost/Drogon) plus all C++ services
+    # from a cold cache is heavy; 30 min was too tight once the base build is
+    # done in-job.
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
+
+      - name: Build C++ base image + proto stubs
+        run: |
+          # Every C++ service Dockerfile does `FROM velocity/cpp-base:builder`,
+          # a locally-built image that exists on no registry. Build it first,
+          # then generate the Go proto stubs that the submission-engine build
+          # COPYs (they are gitignored, so absent on a fresh checkout).
+          # Without this, `compose ... --build` falls back to *pulling*
+          # docker.io/velocity/cpp-base:builder and fails with "pull access
+          # denied". `make build` runs exactly these prerequisites.
+          make build-cpp-base
+          make proto-ensure
 
       - name: Bring up the stack
         run: |
