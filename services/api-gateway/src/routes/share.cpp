@@ -118,26 +118,66 @@ public:
             return;
         }
 
-        // Fetch the canonical snapshot from the leaderboard cache —
-        // scoring-service writes this when a benchmark finishes.
-        const auto snapshot_key = tenant::scoped_key(ctx->id,
-            "leaderboard:snapshot:" + submission_id + ":" + benchmark_id);
-        nlohmann::json snapshot;
+        // Build the public snapshot from the canonical per-submission score
+        // hash that scoring-service maintains (`scores:<submission_id>`).
+        // This is the exact data the leaderboard read + detail endpoints
+        // already serve, so a share is always consistent with the live board.
+        //
+        // Previously this read a `leaderboard:snapshot:<sub>:<bench>` key that
+        // NO service ever wrote, so every mint 404'd. The score hash is not
+        // tenant-scoped (matching leaderboard.cpp's read path).
+        std::unordered_map<std::string, std::string> h;
         try {
-            const auto raw = r->get(snapshot_key);
-            if (!raw) {
-                cb(json_error(drogon::k404NotFound, "snapshot not found"));
-                return;
-            }
-            snapshot = nlohmann::json::parse(*raw, nullptr, false);
-            if (snapshot.is_discarded()) {
-                cb(json_error(drogon::k500InternalServerError, "snapshot malformed"));
-                return;
-            }
+            r->hgetall("scores:" + submission_id, std::inserter(h, h.begin()));
         } catch (const std::exception& e) {
             cb(json_error(drogon::k500InternalServerError, std::string{"redis: "} + e.what()));
             return;
         }
+        if (h.empty()) {
+            cb(json_error(drogon::k404NotFound, "no score for this submission yet"));
+            return;
+        }
+
+        const auto hget = [&](const char* k) -> std::string {
+            const auto it = h.find(k);
+            return it == h.end() ? std::string{} : it->second;
+        };
+        const auto hnum = [&](const char* k) -> double {
+            const auto s = hget(k);
+            if (s.empty()) return 0.0;
+            try { return std::stod(s); } catch (...) { return 0.0; }
+        };
+        const auto hll = [&](const char* k) -> long long {
+            const auto s = hget(k);
+            if (s.empty()) return 0;
+            try { return std::stoll(s); } catch (...) { return 0; }
+        };
+
+        // 1-based leaderboard rank from the composite zset (0 if unranked).
+        long long rank_at_mint = 0;
+        try {
+            if (const auto rr = r->zrevrank("leaderboard:composite", submission_id)) {
+                rank_at_mint = static_cast<long long>(*rr) + 1;
+            }
+        } catch (const std::exception& e) {
+            VLOG_WARN("share.mint: zrevrank failed: {}", e.what());
+        }
+
+        const nlohmann::json snapshot{
+            {"team",            hget("team_name")},
+            {"display",         hget("display_name")},
+            {"profile",         body.value("profile", std::string{})},
+            {"composite_score", hnum("composite_score")},
+            {"latency_ns", {
+                {"p50",  hll("p50_ns")},
+                {"p90",  hll("p90_ns")},
+                {"p99",  hll("p99_ns")},
+                {"p999", hll("p999_ns")},
+                {"max",  hll("max_ns")},
+            }},
+            {"throughput_rps",  hnum("sustained_rps")},
+            {"rank",            rank_at_mint},
+        };
 
         const auto token = mint_token();
         const auto redacted = redacted_snapshot(snapshot);

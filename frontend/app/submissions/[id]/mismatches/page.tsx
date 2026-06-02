@@ -7,13 +7,15 @@
  *
  * Data:
  *   GET /v1/submissions/:id/mismatches
- *      => { taxonomy: {...}, samples: [{ order_id, kind, ref, reported, ts_ns }] }
+ *      => { taxonomy: {...}, samples: [{ correlation_id, kind, reference[], reported, ts_ns }] }
  *
  * The taxonomy counts come from the per-submission Redis hash maintained
  * by scoring-service. The sample list comes from a small ring buffer the
  * validator pushes into Redis LIST `mismatches:<id>` as it observes
- * violations. (The push side will land alongside the validator's full
- * per-order serialization pass.)
+ * violations (see correctness-validator/src/validator.cpp::push_mismatch).
+ * Each sample is `{ ts_ns, correlation_id, kind, reported:{quantity,price,
+ * outcome}, reference:[{price,quantity}, …] }` — the `reference` array is the
+ * fills the gold book produced; `reported` is what the submission claimed.
  */
 
 'use client'
@@ -38,12 +40,18 @@ type Taxonomy = {
   correct_fills: number
 }
 
+type Fill = { price?: number; quantity?: number }
+
 type Sample = {
+  /** Validator emits a numeric correlation id; older/demo data used order_id. */
+  correlation_id?: number | string
   order_id?: string
   side?: 'BUY' | 'SELL'
   kind: 'price' | 'priority' | 'phantom' | 'missing' | 'self-cross' | string
+  /** Gold-book fills (array). Demo fixtures use the legacy `ref` object. */
+  reference?: Fill[]
   ref?: { price?: number; quantity?: number; book?: string }
-  reported?: { price?: number; quantity?: number; book?: string }
+  reported?: { price?: number; quantity?: number; outcome?: number; book?: string }
   ts_ns?: number
 }
 
@@ -143,12 +151,12 @@ export default function MismatchesPage() {
               <tbody>
                 {data.samples.map((s, i) => (
                   <tr key={i} className="border-t border-border-subtle font-mono text-xs">
-                    <td className="py-1.5 pr-4">{s.order_id ? middleTruncate(s.order_id, 16) : '—'}</td>
+                    <td className="py-1.5 pr-4">{formatOrderId(s)}</td>
                     <td className="py-1.5 pr-4">
                       <KindBadge kind={s.kind} />
                     </td>
                     <td className="py-1.5 pr-4">{s.side ?? '—'}</td>
-                    <td className="py-1.5 pr-4">{formatPair(s.ref)}</td>
+                    <td className="py-1.5 pr-4">{formatReference(s)}</td>
                     <td className="py-1.5 pr-4">{formatPair(s.reported)}</td>
                     <td className="py-1.5 pr-4">{s.ts_ns ? new Date(s.ts_ns / 1_000_000).toISOString().split('T')[1] : '—'}</td>
                   </tr>
@@ -189,6 +197,29 @@ function formatPair(p?: { price?: number; quantity?: number; book?: string }) {
   if (p.book) return p.book
   if (p.price != null && p.quantity != null) return `${p.quantity} @ ${p.price}`
   return '—'
+}
+
+function formatOrderId(s: Sample): string {
+  if (s.order_id) return middleTruncate(s.order_id, 16)
+  if (s.correlation_id != null && s.correlation_id !== '') {
+    return middleTruncate(String(s.correlation_id), 16)
+  }
+  return '—'
+}
+
+/**
+ * The validator pushes the gold-book fills as an array of {price, quantity};
+ * older/demo data used a single `ref` object. Render whichever is present.
+ */
+function formatReference(s: Sample): string {
+  if (Array.isArray(s.reference)) {
+    if (s.reference.length === 0) return '(no fill)'
+    return s.reference
+      .filter((f) => f.price != null && f.quantity != null)
+      .map((f) => `${f.quantity} @ ${f.price}`)
+      .join(', ') || '—'
+  }
+  return formatPair(s.ref)
 }
 
 /* Demo fixtures ----------------------------------------------------------- */

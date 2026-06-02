@@ -217,6 +217,12 @@ export default function SubmissionDetailPage() {
           >
             Orderbook →
           </Link>
+          <Link
+            href={`/submissions/${encodeURIComponent(submissionId || routeId)}/build`}
+            className="text-sm font-medium text-accent hover:underline"
+          >
+            Build log →
+          </Link>
           <PcapDownloadLink benchmarkId={latest?.benchmarkId ?? null} />
           {latest?.benchmarkId && (
             <ShareButton

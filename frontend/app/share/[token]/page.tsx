@@ -93,7 +93,7 @@ export default async function SharePage(
           {data.team} · {data.display}
         </h1>
         <p className="text-sm text-muted-foreground">
-          {data.profile} profile · snapshotted {snapshotAt.toUTCString()}
+          {data.profile ? `${data.profile} profile · ` : ''}snapshotted {snapshotAt.toUTCString()}
         </p>
       </header>
 
