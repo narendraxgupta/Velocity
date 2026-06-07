@@ -5,6 +5,8 @@
 add_executable(velocity_common_tests
     env_test.cpp
     time_test.cpp
+    orderbook_test.cpp
+    replay_engine_test.cpp
 )
 
 target_link_libraries(velocity_common_tests

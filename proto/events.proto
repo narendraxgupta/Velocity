@@ -1,0 +1,140 @@
+// Auto-generated domain event definitions for Velocity correctness framework
+syntax = "proto3";
+package velocity.events;
+
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+option java_package = "com.velocity.proto.events";
+option go_package = "github.com/velocity/proto;proto";
+
+// Event envelope. Every domain event MUST be wrapped in this envelope
+// and persisted to the event log. The `payload` is a oneof with strongly
+// typed domain events to make handlers type-safe.
+message EventEnvelope {
+  string event_id = 1;           // UUID
+  string aggregate_id = 2;       // e.g. benchmark_id or order_id
+  string aggregate_type = 3;     // e.g. "InstrumentOrderBook"
+  string benchmark_id = 4;       // canonical benchmark run id
+  string event_type = 5;         // human-friendly event name
+  int64 version = 6;             // aggregate version AFTER this event
+  google.protobuf.Timestamp timestamp = 7; // wallclock for observability
+  map<string,string> metadata = 8; // traceparent, producer, command_id, schema_ver
+
+  oneof payload {
+    SubmissionCreated submission_created = 20;
+    BenchmarkStarted benchmark_started = 21;
+    OrderPlaced order_placed = 22;
+    OrderCancelled order_cancelled = 23;
+    OrderModified order_modified = 24;
+    OrderMatched order_matched = 25;
+    TradeExecuted trade_executed = 26;
+    BenchmarkCompleted benchmark_completed = 27;
+    ValidationFailed validation_failed = 28;
+    ValidationPassed validation_passed = 29;
+    SnapshotCreated snapshot_created = 30;
+  }
+
+  string checksum = 40; // optional payload checksum (hex)
+}
+
+// ------------------------- Domain events ------------------------------
+
+message SubmissionCreated {
+  string submission_id = 1;
+  string owner = 2;
+  string artefact_url = 3;
+  string image_ref = 4;
+  // free-text manifest (JSON) produced by the uploader
+  string manifest = 5;
+}
+
+message BenchmarkStarted {
+  string benchmark_id = 1;
+  string profile = 2;
+  int64 started_at_ns = 3; // monotonic or wallclock as agreed in run config
+  map<string,string> config = 4;
+}
+
+enum Side { SIDE_UNSPECIFIED = 0; BID = 1; ASK = 2; }
+
+message OrderPlaced {
+  string order_id = 1;
+  string submission_id = 2;
+  string instrument = 3;
+  Side side = 4;
+  int64 price_ticks = 5; // integer ticks to avoid FP
+  int64 quantity = 6;
+  int64 display_quantity = 7;
+  string order_type = 8; // LIMIT, MARKET, etc.
+  string time_in_force = 9; // GTC, IOC, FOK
+  string client_order_id = 10;
+  int64 intended_send_ns = 11; // for open-loop attribution
+}
+
+message OrderCancelled {
+  string order_id = 1;
+  string submission_id = 2;
+  int64 cancelled_at_ns = 3;
+}
+
+message OrderModified {
+  string order_id = 1;
+  int64 new_price_ticks = 2;
+  int64 new_quantity = 3;
+  int64 modified_at_ns = 4;
+}
+
+message OrderMatched {
+  string maker_order_id = 1;
+  string taker_order_id = 2;
+  int64 price_ticks = 3;
+  int64 quantity = 4;
+  int64 match_seq = 5; // deterministic ordering within this match op
+}
+
+message TradeExecuted {
+  string trade_id = 1;
+  string maker_order_id = 2;
+  string taker_order_id = 3;
+  int64 price_ticks = 4;
+  int64 quantity = 5;
+  google.protobuf.Timestamp executed_at = 6;
+}
+
+message BenchmarkCompleted {
+  string benchmark_id = 1;
+  int64 completed_at_ns = 2;
+  string summary_url = 3; // immutable report location
+}
+
+enum ViolationType {
+  VIOLATION_UNSPECIFIED = 0;
+  OVERFILL = 1;
+  NEGATIVE_QUANTITY = 2;
+  PRICE_VIOLATION = 3;
+  PRIORITY_VIOLATION = 4;
+  PHANTOM_FILL = 5;
+  MISSING_FILL = 6;
+}
+
+message ValidationFailed {
+  string benchmark_id = 1;
+  ViolationType violation = 2;
+  string message = 3;
+  string at_event_id = 4; // event that triggered the violation
+  map<string,string> details = 5;
+}
+
+message ValidationPassed {
+  string benchmark_id = 1;
+  string report_url = 2; // immutable archive of the validation report
+}
+
+message SnapshotCreated {
+  string aggregate_id = 1;
+  string aggregate_type = 2;
+  int64 version = 3;
+  string snapshot_blob_url = 4;
+  google.protobuf.Timestamp created_at = 5;
+}

@@ -14,6 +14,8 @@ add_library(${_module_name} STATIC
     src/env.cpp
     src/signals.cpp
     src/tracing.cpp
+    src/orderbook.cpp
+    src/replay_engine.cpp
 )
 add_library(velocity::common ALIAS ${_module_name})
 
