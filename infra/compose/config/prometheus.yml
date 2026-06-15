@@ -14,47 +14,26 @@ global:
 
 scrape_configs:
   # ---- Our services -----------------------------------------------------
-  - job_name: api-gateway
-    static_configs:
-      - targets: [api-gateway:9091]
-        labels: { service: api-gateway, tier: control-plane }
-
-  - job_name: submission-engine
-    static_configs:
-      - targets: [submission-engine:9092]
-        labels: { service: submission-engine, tier: control-plane }
-
-  - job_name: bot-controller
-    static_configs:
-      - targets: [bot-controller:9093]
-        labels: { service: bot-controller, tier: load-gen }
-
-  - job_name: bot-worker
-    dns_sd_configs:
-      - names: [bot-worker]
-        type: A
-        port: 9094
-    relabel_configs:
-      - source_labels: [__meta_dns_name]
-        target_label: instance
-    static_configs:
-      - targets: []
-        labels: { service: bot-worker, tier: load-gen }
-
-  - job_name: telemetry-ingester
-    static_configs:
-      - targets: [telemetry-ingester:9095]
-        labels: { service: telemetry-ingester, tier: data-plane }
-
-  - job_name: correctness-validator
-    static_configs:
-      - targets: [correctness-validator:9096]
-        labels: { service: correctness-validator, tier: data-plane }
-
+  #
+  # Only services that actually expose a Prometheus /metrics endpoint are
+  # scraped. leaderboard-ws serves /metrics on its WebSocket port (8090) and
+  # audit-log on its HTTP port. The remaining C++ services (api-gateway,
+  # submission-engine, bot-controller, bot-worker, telemetry-ingester,
+  # correctness-validator) do not yet bind a /metrics exposer, so scraping
+  # their nominal 909x ports only produced a wall of DOWN targets. They are
+  # intentionally omitted until the in-process exposer is wired in; add the
+  # jobs back here when it lands.
   - job_name: leaderboard-ws
     static_configs:
-      - targets: [leaderboard-ws:9097]
+      - targets: [leaderboard-ws:8090]
         labels: { service: leaderboard-ws, tier: data-plane }
+    metrics_path: /metrics
+
+  - job_name: audit-log
+    static_configs:
+      - targets: [audit-log:8081]
+        labels: { service: audit-log, tier: data-plane }
+    metrics_path: /metrics
 
   # ---- Infrastructure ---------------------------------------------------
   - job_name: redpanda
@@ -63,10 +42,13 @@ scrape_configs:
         labels: { service: redpanda, tier: infra }
     metrics_path: /metrics
 
+  # QuestDB exposes Prometheus metrics on its HTTP port (9000) at /metrics,
+  # not on 9003 (which nothing binds).
   - job_name: questdb
     static_configs:
-      - targets: [questdb:9003]
+      - targets: [questdb:9000]
         labels: { service: questdb, tier: infra }
+    metrics_path: /metrics
 
   # ---- Self ------------------------------------------------------------
   - job_name: prometheus

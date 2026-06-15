@@ -3,7 +3,7 @@
 #  e2e-smoke.sh
 #
 #  End-to-end smoke test. Assumes the full docker-compose stack is up
-#  (see `make compose-up`). The test:
+#  (see `make up` / `make up-apps`). The test:
 #
 #    1. Builds a Dockerfile-context tar for the sample matching engine and
 #       uploads it via POST /v1/submissions  (artefact -> MinIO via engine).

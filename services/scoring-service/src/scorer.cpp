@@ -205,15 +205,29 @@ struct Scorer::Impl {
     auto recompute_(const std::string& sid, State& st) -> void {
         // Sustained = p10 (nearest-rank) of recent 1s samples — matches
         // docs/scoring.md §6.
+        //
+        // We compute the p10 over NON-ZERO windows only. Ramp-up/warmup and
+        // the trailing drain produce 1s windows with zero completed orders;
+        // including them made p10 collapse to 0 on short runs (the warmup zero
+        // is always in the bottom decile), so throughput_score was a spurious 0
+        // even when the submission sustained thousands of RPS during the hold
+        // phase. If every window is zero (no throughput at all) sustained stays
+        // 0, which is correct.
         std::uint64_t sustained = st.score.sustained_rps;
-        if (!st.rps_samples.empty()) {
-            std::vector<std::uint64_t> s = st.rps_samples;
+        std::vector<std::uint64_t> s;
+        s.reserve(st.rps_samples.size());
+        for (const auto v : st.rps_samples) {
+            if (v > 0) s.push_back(v);
+        }
+        if (!s.empty()) {
             std::sort(s.begin(), s.end());
             const auto n = s.size();
             const auto idx = std::min<std::size_t>(
                 n - 1,
                 static_cast<std::size_t>(std::max<double>(1.0, std::ceil(0.10 * static_cast<double>(n)))) - 1);
             sustained = s[idx];
+        } else {
+            sustained = 0;
         }
         st.score.sustained_rps   = sustained;
         st.score.target_rps      = cfg.default_target_rps;

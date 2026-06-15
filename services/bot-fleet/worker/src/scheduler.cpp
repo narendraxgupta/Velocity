@@ -13,8 +13,12 @@ namespace {
 // advance by zero and the reactor would spin without ever exiting the
 // "intended time has arrived" check. We clamp here rather than in the
 // reactor so the contract lives with the scheduler.
+//
+// rps == 0 is handled separately via the paused_ flag (the reactor halts
+// sends), so step_for is only ever called with rps >= 1. We still clamp the
+// rps==0 case to a sane 1 Hz so a missed pause check can't divide by zero.
 [[nodiscard]] constexpr auto step_for(std::uint64_t rps) noexcept -> std::int64_t {
-    if (rps == 0) return 1'000'000'000;  // pretend 1 Hz when paused
+    if (rps == 0) return 1'000'000'000;
     const auto step = static_cast<std::int64_t>(1'000'000'000ULL / rps);
     return step <= 0 ? 1 : step;
 }
@@ -22,7 +26,8 @@ namespace {
 
 Scheduler::Scheduler(std::int64_t start_mono_ns, std::uint64_t initial_rps) noexcept
     : next_intended_ns_(start_mono_ns),
-      step_ns_(step_for(initial_rps)) {}
+      step_ns_(step_for(initial_rps)),
+      paused_(initial_rps == 0) {}
 
 auto Scheduler::next() noexcept -> std::int64_t {
     const auto out = next_intended_ns_;
@@ -31,7 +36,14 @@ auto Scheduler::next() noexcept -> std::int64_t {
 }
 
 auto Scheduler::set_rate(std::uint64_t rps) noexcept -> void {
+    if (rps == 0) {
+        // Pause: leave step_ns_ untouched (unused while paused) and signal
+        // the reactor to stop issuing requests.
+        paused_.store(true, std::memory_order_relaxed);
+        return;
+    }
     step_ns_.store(step_for(rps), std::memory_order_relaxed);
+    paused_.store(false, std::memory_order_relaxed);
 }
 
 auto Scheduler::skew_ns(std::int64_t now_mono_ns) const noexcept -> std::int64_t {

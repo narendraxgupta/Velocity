@@ -11,6 +11,10 @@ apiVersion: 1
 datasources:
   - name: Prometheus
     type: prometheus
+    # Dashboards reference panels by datasource uid "prometheus"; this must be
+    # set explicitly or Grafana assigns a random uid and panels show "datasource
+    # not found".
+    uid: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
@@ -20,11 +24,13 @@ datasources:
 
   - name: QuestDB
     type: postgres
+    uid: questdb
     access: proxy
     url: questdb:8812
-    user: admin
+    # Must match QDB_PG_USER / QDB_PG_PASSWORD in docker-compose.yml.
+    user: velocity
     secureJsonData:
-      password: quest
+      password: velocity-dev
     jsonData:
       database: qdb
       sslmode: disable

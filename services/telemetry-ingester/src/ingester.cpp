@@ -175,14 +175,16 @@ struct Ingester::Impl {
                 // request fields (price/qty/sent) come from the stashed intent.
                 questdb->append_order_event(
                     p.submission_id, latency,
-                    p.price_units, p.qty_units, outcome, p.sent_ts_ns);
+                    p.price_units, p.qty_units, outcome,
+                    velocity::time::monotonic_to_wallclock_ns(p.sent_ts_ns));
                 pending.erase(it);
             } else {
                 // Completion with no matching intent (intent dropped or evicted).
                 // Record what we can; latency is unknowable without the intent.
                 questdb->append_order_event(
                     sid, 0, ev.price().units(), ev.quantity().units(),
-                    outcome, static_cast<std::int64_t>(ev.sent_ts_ns()));
+                    outcome, velocity::time::monotonic_to_wallclock_ns(
+                                 static_cast<std::int64_t>(ev.sent_ts_ns())));
             }
             return;
         }
@@ -195,7 +197,8 @@ struct Ingester::Impl {
                     velocity::telemetry::v1::Outcome::OUTCOME_REJECTED)) {
                 questdb->append_order_event(
                     sid, 0, ev.price().units(), ev.quantity().units(),
-                    outcome, static_cast<std::int64_t>(ev.sent_ts_ns()));
+                    outcome, velocity::time::monotonic_to_wallclock_ns(
+                                 static_cast<std::int64_t>(ev.sent_ts_ns())));
                 return;
             }
             if (pending.size() < kMaxPending) {
@@ -211,7 +214,8 @@ struct Ingester::Impl {
         // Neither intent nor completion (malformed/legacy) — record raw, no latency.
         questdb->append_order_event(
             sid, 0, ev.price().units(), ev.quantity().units(),
-            outcome, static_cast<std::int64_t>(ev.sent_ts_ns()));
+            outcome, velocity::time::monotonic_to_wallclock_ns(
+                         static_cast<std::int64_t>(ev.sent_ts_ns())));
     }
 
     // Evict pending intents whose completion never arrived. They are written
@@ -224,7 +228,7 @@ struct Ingester::Impl {
                     it->second.price_units, it->second.qty_units,
                     static_cast<std::int32_t>(
                         velocity::telemetry::v1::Outcome::OUTCOME_TIMEOUT),
-                    it->second.sent_ts_ns);
+                    velocity::time::monotonic_to_wallclock_ns(it->second.sent_ts_ns));
                 it = pending.erase(it);
             } else {
                 ++it;

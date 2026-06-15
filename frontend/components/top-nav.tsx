@@ -11,6 +11,8 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { Menu, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { cn } from '@/lib/utils'
@@ -24,16 +26,26 @@ const nav = [
   { href: '/admin', label: 'Admin' },
 ] as const
 
+function isActive(pathname: string, href: string): boolean {
+  return href === '/' ? pathname === '/' : pathname.startsWith(href)
+}
+
 export function TopNav() {
   const pathname = usePathname()
+  const [open, setOpen] = useState(false)
+
+  // Close the mobile menu whenever the route changes.
+  useEffect(() => {
+    setOpen(false)
+  }, [pathname])
 
   return (
-    <header className="sticky top-0 z-50 h-[var(--header-h)] border-b border-border bg-background/85 backdrop-blur-md backdrop-saturate-150">
-      <div className="container flex h-full items-center justify-between gap-6">
+    <header className="sticky top-0 z-50 border-b border-border bg-background/85 backdrop-blur-md backdrop-saturate-150">
+      <div className="container flex h-[var(--header-h)] items-center justify-between gap-4 md:gap-6">
         {/* Brand */}
         <Link
           href="/"
-          className="flex items-center gap-2.5 transition-opacity hover:opacity-80"
+          className="flex shrink-0 items-center gap-2.5 transition-opacity hover:opacity-80"
           aria-label="Velocity home"
         >
           <BrandMark className="h-5 w-5" />
@@ -45,38 +57,72 @@ export function TopNav() {
           </span>
         </Link>
 
-        {/* Primary nav */}
-        <nav className="flex items-center gap-1" aria-label="Primary">
-          {nav.map((item) => {
-            const active =
-              item.href === '/'
-                ? pathname === '/'
-                : pathname.startsWith(item.href)
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  'rounded px-3 py-1.5 text-sm font-medium transition-colors',
-                  active
-                    ? 'bg-surface-elevated text-foreground shadow-inset-border'
-                    : 'text-muted-foreground hover:bg-surface hover:text-foreground',
-                )}
-              >
-                {item.label}
-              </Link>
-            )
-          })}
+        {/* Primary nav — inline from md up */}
+        <nav className="hidden items-center gap-1 md:flex" aria-label="Primary">
+          {nav.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={isActive(pathname, item.href) ? 'page' : undefined}
+              className={cn(
+                'rounded px-3 py-1.5 text-sm font-medium transition-colors',
+                isActive(pathname, item.href)
+                  ? 'bg-surface-elevated text-foreground shadow-inset-border'
+                  : 'text-muted-foreground hover:bg-surface hover:text-foreground',
+              )}
+            >
+              {item.label}
+            </Link>
+          ))}
         </nav>
 
         {/* Status cluster */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3">
           <KbdHint />
           <EnvBadge />
           <ThemeToggle />
           <LiveBadge />
+          {/* Hamburger — only below md */}
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-label={open ? 'Close menu' : 'Open menu'}
+            aria-expanded={open}
+            aria-controls="mobile-nav"
+            className="inline-flex h-8 w-8 items-center justify-center rounded border border-border-subtle bg-surface text-muted-foreground transition-colors hover:bg-surface-elevated hover:text-foreground md:hidden"
+          >
+            {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+          </button>
         </div>
       </div>
+
+      {/* Mobile menu — slides open below md */}
+      <nav
+        id="mobile-nav"
+        aria-label="Mobile"
+        className={cn(
+          'overflow-hidden border-t border-border-subtle bg-background/95 backdrop-blur-md transition-[max-height] duration-200 ease-out md:hidden',
+          open ? 'max-h-96' : 'max-h-0 border-t-0',
+        )}
+      >
+        <div className="container flex flex-col gap-1 py-2">
+          {nav.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={isActive(pathname, item.href) ? 'page' : undefined}
+              className={cn(
+                'rounded px-3 py-2.5 text-sm font-medium transition-colors',
+                isActive(pathname, item.href)
+                  ? 'bg-surface-elevated text-foreground shadow-inset-border'
+                  : 'text-muted-foreground hover:bg-surface hover:text-foreground',
+              )}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
+      </nav>
     </header>
   )
 }

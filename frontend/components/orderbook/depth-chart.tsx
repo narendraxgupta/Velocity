@@ -14,6 +14,17 @@ import dynamic from 'next/dynamic'
 import { useMemo } from 'react'
 
 import type { DepthRow } from '@/lib/hooks/use-orderbook-replay'
+import {
+  areaGradient,
+  AXIS_LABEL,
+  AXIS_LINE_SUBTLE,
+  CHART_COLORS,
+  CROSSHAIR,
+  glowLine,
+  LEGEND_BASE,
+  SPLIT_LINE_SUBTLE,
+  TOOLTIP_BASE,
+} from '@/lib/charts/theme'
 
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false })
 
@@ -45,47 +56,36 @@ export function DepthChart({ bids, asks, priceScale = 1_000_000 }: Props) {
   }, [bids, asks, priceScale])
 
   const option = useMemo(() => ({
-    animation: false,
-    grid: { left: 56, right: 16, top: 32, bottom: 36 },
+    animation: true,
+    animationDuration: 320,
+    animationEasing: 'cubicOut',
+    grid: { left: 60, right: 18, top: 36, bottom: 38 },
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(15,16,20,0.94)',
-      borderColor: 'rgba(255,255,255,0.06)',
-      borderWidth: 1,
-      textStyle: { color: '#e6e7ea', fontFamily: 'var(--font-mono, monospace)', fontSize: 12 },
+      ...TOOLTIP_BASE,
+      axisPointer: CROSSHAIR,
     },
-    legend: {
-      bottom: 0,
-      textStyle: { color: '#9ba0a6', fontFamily: 'var(--font-mono, monospace)', fontSize: 10 },
-      itemWidth: 12,
-      itemHeight: 2,
-    },
+    legend: { ...LEGEND_BASE },
     xAxis: {
       type: 'value',
       scale: true,
-      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
-      axisLabel: {
-        color: '#6b7077',
-        fontFamily: 'var(--font-mono, monospace)',
-        fontSize: 10,
-        formatter: (v: number) => v.toFixed(2),
-      },
+      axisLine: AXIS_LINE_SUBTLE,
+      axisLabel: { ...AXIS_LABEL, formatter: (v: number) => v.toFixed(2) },
+      axisPointer: { label: { formatter: (p: { value: number }) => p.value.toFixed(4) } },
       splitLine: { show: false },
     },
     yAxis: {
       type: 'value',
       axisLine: { show: false },
       axisLabel: {
-        color: '#6b7077',
-        fontFamily: 'var(--font-mono, monospace)',
-        fontSize: 10,
+        ...AXIS_LABEL,
         formatter: (v: number) =>
           v >= 1e6 ? `${(v / 1e6).toFixed(1)}M`
             : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k`
             : v.toFixed(0),
       },
-      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
+      splitLine: SPLIT_LINE_SUBTLE,
     },
     series: [
       {
@@ -95,9 +95,25 @@ export function DepthChart({ bids, asks, priceScale = 1_000_000 }: Props) {
         showSymbol: false,
         smooth: false,
         sampling: 'lttb',
-        lineStyle: { width: 1.5, color: '#34d399' },
-        areaStyle: { color: 'rgba(52,211,153,0.12)' },
+        lineStyle: glowLine(CHART_COLORS.live, 2, 12),
+        areaStyle: { color: areaGradient('rgba(16,240,149,0.32)', 'rgba(16,240,149,0.02)') },
         data: bidPoints,
+        // Vertical mid-price marker drawn once on the bid series.
+        markLine: midPrice
+          ? {
+              symbol: 'none',
+              silent: true,
+              label: {
+                color: '#9ba0a6',
+                fontFamily: 'var(--font-mono, monospace)',
+                fontSize: 9,
+                formatter: 'mid',
+                position: 'insideEndTop',
+              },
+              lineStyle: { color: 'rgba(255,255,255,0.25)', type: 'dashed', width: 1 },
+              data: [{ xAxis: midPrice }],
+            }
+          : undefined,
       },
       {
         name: 'asks',
@@ -106,13 +122,13 @@ export function DepthChart({ bids, asks, priceScale = 1_000_000 }: Props) {
         showSymbol: false,
         smooth: false,
         sampling: 'lttb',
-        lineStyle: { width: 1.5, color: '#f87171' },
-        areaStyle: { color: 'rgba(248,113,113,0.12)' },
+        lineStyle: glowLine(CHART_COLORS.ask, 2, 12),
+        areaStyle: { color: areaGradient('rgba(244,63,94,0.32)', 'rgba(244,63,94,0.02)') },
         data: askPoints,
       },
     ],
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [bidPoints, askPoints])
+  }), [bidPoints, askPoints, midPrice])
 
   return (
     <div className="space-y-2">

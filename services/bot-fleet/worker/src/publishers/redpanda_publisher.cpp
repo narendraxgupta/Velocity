@@ -192,7 +192,10 @@ auto Publisher::drain_loop_(std::size_t reactor_id) -> void {
                 RdKafka::Producer::RK_MSG_COPY,
                 buf.data(), buf.size(),
                 key.data(), key.size(),
-                ev.sent_ts_ns / 1'000'000,    // millisecond timestamp hint
+                // timestamp=0 → librdkafka stamps current wall-clock ms.
+                // ev.sent_ts_ns is CLOCK_MONOTONIC_RAW (not Unix epoch), so it
+                // must NOT be used as the broker message timestamp.
+                0,
                 nullptr, nullptr);
             if (err == RdKafka::ERR_NO_ERROR) {
                 published_.fetch_add(1, std::memory_order_relaxed);

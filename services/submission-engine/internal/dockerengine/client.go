@@ -126,8 +126,14 @@ func (c *Client) BuildImage(ctx context.Context, tag string, contextTar []byte,
 			}
 			return fmt.Errorf("decode build stream: %w", err)
 		}
+		// Docker reports build failures in `error` and/or the structured
+		// `errorDetail.message`. Some failures only populate errorDetail, so
+		// checking `error` alone let failed builds return success.
 		if line.Error != "" {
 			return fmt.Errorf("image build failed: %s", line.Error)
+		}
+		if line.ErrorDetail.Message != "" {
+			return fmt.Errorf("image build failed: %s", line.ErrorDetail.Message)
 		}
 		if onLog != nil {
 			if s := strings.TrimRight(line.Stream, "\n"); s != "" {

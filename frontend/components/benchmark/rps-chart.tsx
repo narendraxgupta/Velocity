@@ -12,6 +12,18 @@
 import dynamic from 'next/dynamic'
 import { useMemo } from 'react'
 
+import {
+  areaGradient,
+  AXIS_LABEL,
+  AXIS_LINE_SUBTLE,
+  CHART_COLORS,
+  CROSSHAIR,
+  glowLine,
+  LEGEND_BASE,
+  SPLIT_LINE_SUBTLE,
+  TOOLTIP_BASE,
+} from '@/lib/charts/theme'
+
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false })
 
 export type RpsSample = {
@@ -25,70 +37,72 @@ export function RpsChart({ samples }: { samples: RpsSample[] }) {
     const offered = samples.map((s) => [s.tsMs, s.targetRps] as const)
     const sustained = samples.map((s) => [s.tsMs, s.currentRps] as const)
     const cliffPoint = detectCliff(samples)
+    const lastTs = samples[samples.length - 1]?.tsMs ?? 0
 
     return {
       cliff: cliffPoint,
       option: {
         animation: false,
-        grid: { left: 56, right: 12, top: 24, bottom: 32 },
+        grid: { left: 60, right: 14, top: 28, bottom: 34 },
         backgroundColor: 'transparent',
         tooltip: {
           trigger: 'axis',
-          backgroundColor: 'rgba(15,16,20,0.94)',
-          borderColor: 'rgba(255,255,255,0.06)',
-          textStyle: { color: '#e6e7ea', fontFamily: 'var(--font-mono, monospace)', fontSize: 12 },
+          ...TOOLTIP_BASE,
+          axisPointer: CROSSHAIR,
+          valueFormatter: (v: number) => `${formatRps(v)} rps`,
         },
-        legend: {
-          bottom: 0,
-          textStyle: { color: '#9ba0a6', fontFamily: 'var(--font-mono, monospace)', fontSize: 10 },
-          itemWidth: 12,
-          itemHeight: 2,
-        },
+        legend: { ...LEGEND_BASE },
         xAxis: {
           type: 'time',
-          axisLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
-          axisLabel: { color: '#6b7077', fontFamily: 'var(--font-mono, monospace)', fontSize: 10 },
+          axisLine: AXIS_LINE_SUBTLE,
+          axisLabel: AXIS_LABEL,
+          axisPointer: { label: { formatter: '' } },
           splitLine: { show: false },
         },
         yAxis: {
           type: 'value',
           axisLine: { show: false },
-          axisLabel: {
-            color: '#6b7077',
-            fontFamily: 'var(--font-mono, monospace)',
-            fontSize: 10,
-            formatter: (v: number) => formatRps(v),
-          },
-          splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
+          axisLabel: { ...AXIS_LABEL, formatter: (v: number) => formatRps(v) },
+          axisPointer: { label: { formatter: (p: { value: number }) => formatRps(p.value) } },
+          splitLine: SPLIT_LINE_SUBTLE,
         },
         series: [
           {
             name: 'Offered',
             type: 'line',
             symbol: 'none',
-            smooth: false,
-            lineStyle: { width: 1.5, color: 'rgba(123, 154, 255, 0.7)' },
+            smooth: true,
+            lineStyle: { width: 1.5, color: CHART_COLORS.violet, type: 'dashed', opacity: 0.85 },
             data: offered,
           },
           {
             name: 'Sustained',
             type: 'line',
             symbol: 'none',
-            smooth: false,
-            areaStyle: { color: 'rgba(96, 250, 175, 0.10)' },
-            lineStyle: { width: 2, color: '#60FAAF' },
+            smooth: true,
+            areaStyle: { color: areaGradient('rgba(16,240,149,0.28)', 'rgba(16,240,149,0)') },
+            lineStyle: glowLine(CHART_COLORS.live, 2.5, 14),
             data: sustained,
             markLine: cliffPoint
               ? {
                   symbol: 'none',
                   label: {
-                    color: '#fbbf24',
+                    color: CHART_COLORS.amber,
                     fontFamily: 'var(--font-mono, monospace)',
                     fontSize: 10,
-                    formatter: 'cliff',
+                    formatter: 'CLIFF',
                   },
-                  lineStyle: { color: '#fbbf24', type: 'dashed' },
+                  lineStyle: { color: CHART_COLORS.amber, type: 'dashed', width: 1.5 },
                   data: [{ xAxis: cliffPoint.tsMs }],
+                }
+              : undefined,
+            // Shade the post-cliff region red — the zone where the engine
+            // under test stopped keeping up with offered load.
+            markArea: cliffPoint
+              ? {
+                  silent: true,
+                  itemStyle: { color: 'rgba(244,63,94,0.07)' },
+                  data: [[{ xAxis: cliffPoint.tsMs }, { xAxis: lastTs }]],
                 }
               : undefined,
           },

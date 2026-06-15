@@ -73,6 +73,20 @@ logs: ## Tail logs from every service.
 ps: ## Show running services.
 	$(COMPOSE) ps
 
+##@ Diagnostics
+
+.PHONY: doctor
+doctor: ## Full health report: containers, logs, ports, HTTP + data-plane probes.
+	@bash scripts/doctor.sh
+
+.PHONY: doctor-logs
+doctor-logs: ## Same as doctor, but print the offending log lines too.
+	@bash scripts/doctor.sh --logs
+
+.PHONY: errors
+errors: ## Live-tail error lines across every service (Ctrl+C to stop).
+	@bash scripts/tail-errors.sh
+
 ##@ Build
 
 .PHONY: build

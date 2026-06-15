@@ -15,6 +15,18 @@
 import dynamic from 'next/dynamic'
 import { useMemo, useRef } from 'react'
 
+import {
+  areaGradient,
+  AXIS_LABEL,
+  AXIS_LINE_SUBTLE,
+  CHART_COLORS,
+  CROSSHAIR,
+  glowLine,
+  LEGEND_BASE,
+  SPLIT_LINE_SUBTLE,
+  TOOLTIP_BASE,
+} from '@/lib/charts/theme'
+
 // echarts-for-react is client-only; load lazily.
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false })
 
@@ -44,49 +56,43 @@ export function LatencyChart({ samples }: { samples: LatencySample[] }) {
 
     return {
       animation: false,
-      grid: { left: 48, right: 12, top: 24, bottom: 28 },
+      grid: { left: 52, right: 14, top: 28, bottom: 30 },
       backgroundColor: 'transparent',
       tooltip: {
         trigger: 'axis',
-        backgroundColor: 'rgba(15,16,20,0.94)',
-        borderColor: 'rgba(255,255,255,0.06)',
-        borderWidth: 1,
-        textStyle: { color: '#e6e7ea', fontFamily: 'var(--font-mono, monospace)', fontSize: 12 },
+        ...TOOLTIP_BASE,
+        axisPointer: CROSSHAIR,
         valueFormatter: (v: number) => formatMs(v),
       },
-      legend: {
-        bottom: 0,
-        textStyle: { color: '#9ba0a6', fontFamily: 'var(--font-mono, monospace)', fontSize: 10 },
-        itemWidth: 12,
-        itemHeight: 2,
-      },
+      legend: { ...LEGEND_BASE },
       xAxis: {
         type: 'time',
-        axisLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
-        axisLabel: { color: '#6b7077', fontFamily: 'var(--font-mono, monospace)', fontSize: 10 },
+        axisLine: AXIS_LINE_SUBTLE,
+        axisLabel: AXIS_LABEL,
+        axisPointer: { label: { formatter: '' } },
         splitLine: { show: false },
       },
       yAxis: {
         type: 'log',
         logBase: 10,
         axisLine: { show: false },
-        axisLabel: {
-          color: '#6b7077',
-          fontFamily: 'var(--font-mono, monospace)',
-          fontSize: 10,
-          formatter: (v: number) => formatMs(v),
-        },
-        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
+        axisLabel: { ...AXIS_LABEL, formatter: (v: number) => formatMs(v) },
+        axisPointer: { label: { formatter: (p: { value: number }) => formatMs(p.value) } },
+        splitLine: SPLIT_LINE_SUBTLE,
       },
       series: [
-        { name: 'p50',  type: 'line', symbol: 'none', smooth: false,
-          lineStyle: { width: 1.5, color: '#7dd3fc' }, data: lineData('p50Ns') },
-        { name: 'p90',  type: 'line', symbol: 'none', smooth: false,
-          lineStyle: { width: 1.5, color: '#a78bfa' }, data: lineData('p90Ns') },
-        { name: 'p99',  type: 'line', symbol: 'none', smooth: false,
-          lineStyle: { width: 2,   color: '#fbbf24' }, data: lineData('p99Ns') },
-        { name: 'p999', type: 'line', symbol: 'none', smooth: false,
-          lineStyle: { width: 2,   color: '#ef4444' }, data: lineData('p999Ns') },
+        { name: 'p50',  type: 'line', symbol: 'none', smooth: true,
+          lineStyle: glowLine(CHART_COLORS.cyan, 1.5, 6), data: lineData('p50Ns') },
+        { name: 'p90',  type: 'line', symbol: 'none', smooth: true,
+          lineStyle: glowLine(CHART_COLORS.violet, 1.5, 6), data: lineData('p90Ns') },
+        // p99 is the headline series — brighter glow + a gradient fill so the
+        // tail "mountain" reads at a glance.
+        { name: 'p99',  type: 'line', symbol: 'none', smooth: true,
+          lineStyle: glowLine(CHART_COLORS.amber, 2.5, 14),
+          areaStyle: { color: areaGradient('rgba(255,169,64,0.22)', 'rgba(255,169,64,0)'), origin: 'start' },
+          data: lineData('p99Ns') },
+        { name: 'p999', type: 'line', symbol: 'none', smooth: true,
+          lineStyle: glowLine(CHART_COLORS.ask, 2, 10), data: lineData('p999Ns') },
         // Kernel-side overlay (eBPF). Dashed lines + muted colors so they
         // visually nest underneath the userspace series. The delta between
         // matching pairs (userspace_p99 − kernel_p99) is the time the
@@ -98,16 +104,16 @@ export function LatencyChart({ samples }: { samples: LatencySample[] }) {
                 name: 'p50 (kernel)',
                 type: 'line',
                 symbol: 'none',
-                smooth: false,
-                lineStyle: { width: 1.5, color: '#7dd3fc', type: 'dashed', opacity: 0.7 },
+                smooth: true,
+                lineStyle: { width: 1.5, color: CHART_COLORS.cyan, type: 'dashed', opacity: 0.55 },
                 data: lineData('kernelP50Ns'),
               },
               {
                 name: 'p99 (kernel)',
                 type: 'line',
                 symbol: 'none',
-                smooth: false,
-                lineStyle: { width: 2, color: '#fbbf24', type: 'dashed', opacity: 0.7 },
+                smooth: true,
+                lineStyle: { width: 2, color: CHART_COLORS.amber, type: 'dashed', opacity: 0.55 },
                 data: lineData('kernelP99Ns'),
               },
             ]

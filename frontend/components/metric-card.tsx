@@ -62,7 +62,8 @@ export function MetricCard({
     <div
       className={cn(
         'group relative isolate flex flex-col gap-2 overflow-hidden rounded-md border border-border bg-surface px-4 py-3 shadow-panel-sm',
-        'before:absolute before:left-0 before:top-0 before:h-full before:w-[2px] before:opacity-70',
+        'transition-colors duration-200 hover:border-border-subtle hover:bg-surface-elevated',
+        'before:absolute before:left-0 before:top-0 before:h-full before:w-[2px] before:opacity-70 before:transition-[width,opacity] group-hover:before:w-[3px] group-hover:before:opacity-100',
         toneRing[tone],
         className,
       )}

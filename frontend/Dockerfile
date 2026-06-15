@@ -41,10 +41,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # baked into the routes manifest at build time, hence it's a build arg.
 #
 # NEXT_PUBLIC_LEADERBOARD_WS is the leaderboard WebSocket URL. WS can't be
-# proxied reliably by Next standalone, so the browser connects to it directly;
-# for a Codespace pass the public wss://<name>-8090.app.github.dev/... URL.
+# proxied reliably by Next standalone, so the browser connects to it directly.
+# It defaults to EMPTY on purpose: the client then derives the URL at runtime
+# from window.location (handling both localhost and the GitHub Codespaces
+# "<name>-8090.app.github.dev" tunnel automatically). Only set a non-empty
+# absolute URL to force a specific endpoint.
 ARG NEXT_PUBLIC_API_GATEWAY_URL=
-ARG NEXT_PUBLIC_LEADERBOARD_WS=ws://localhost:8090/v1/leaderboard
+ARG NEXT_PUBLIC_LEADERBOARD_WS=
 ARG API_GATEWAY_ORIGIN=http://api-gateway:8080
 ENV NEXT_PUBLIC_API_GATEWAY_URL=${NEXT_PUBLIC_API_GATEWAY_URL}
 ENV NEXT_PUBLIC_LEADERBOARD_WS=${NEXT_PUBLIC_LEADERBOARD_WS}

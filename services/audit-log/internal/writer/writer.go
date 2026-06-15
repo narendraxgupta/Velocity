@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +24,16 @@ import (
 
 	"github.com/velocity/platform/services/audit-log/internal/event"
 )
+
+// getenvOr returns the env var value or a fallback default. Centralised so
+// the QuestDB PG-wire credentials can be overridden per-deployment (the
+// compose stack hardens QuestDB away from the admin:quest defaults).
+func getenvOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
 
 // QuestDB owns both the ILP (write) and pg-wire (read) connections.
 // Splitting them apart turned out worse: the API server needs the same
@@ -43,7 +55,15 @@ func NewQuestDB(host string, ilpPort uint16, log *zap.SugaredLogger) (*QuestDB, 
 	// We give the pgx pool a generous 10s connect timeout so the
 	// pod doesn't crash-loop on a slow QuestDB startup; the consumer
 	// will retry the ILP socket independently.
-	pgURL := fmt.Sprintf("postgres://admin:quest@%s:8812/qdb?pool_max_conns=4", host)
+	//
+	// Credentials default to QuestDB's stock admin:quest but are
+	// overridable so the compose/k8s stacks can run QuestDB with the
+	// PG-wire auth hardened (QDB_PG_USER/QDB_PG_PASSWORD).
+	pgUser := getenvOr("QUESTDB_PG_USER", "admin")
+	pgPass := getenvOr("QUESTDB_PG_PASSWORD", "quest")
+	pgPort := getenvOr("QUESTDB_PG_PORT", "8812")
+	pgURL := fmt.Sprintf("postgres://%s:%s@%s:%s/qdb?pool_max_conns=4",
+		url.QueryEscape(pgUser), url.QueryEscape(pgPass), host, pgPort)
 	pool, err := pgxpool.New(context.Background(), pgURL)
 	if err != nil {
 		return nil, fmt.Errorf("questdb pgx pool: %w", err)
@@ -73,24 +93,24 @@ func (q *QuestDB) Close() {
 
 func (q *QuestDB) ensureSchema(ctx context.Context) error {
 	const ddl = `
-		CREATE TABLE IF NOT EXISTS audit_events (
-			occurred_at TIMESTAMP,
-			event_id    SYMBOL CAPACITY 4096 NOCACHE,
-			tenant_id   SYMBOL CAPACITY 256,
-			subject     SYMBOL CAPACITY 4096 NOCACHE,
-			role        SYMBOL CAPACITY 16,
-			source      SYMBOL CAPACITY 32,
-			action      SYMBOL CAPACITY 256,
-			resource_type SYMBOL CAPACITY 128,
-			resource_id   SYMBOL CAPACITY 4096 NOCACHE,
-			outcome     SYMBOL CAPACITY 8,
-			status_code INT,
-			remote_ip   SYMBOL CAPACITY 1024 NOCACHE,
-			request_id  SYMBOL CAPACITY 4096 NOCACHE,
-			meta_json   STRING,
-			chain_hash  STRING
-		) TIMESTAMP(occurred_at) PARTITION BY DAY WAL;
-	`
+        CREATE TABLE IF NOT EXISTS audit_events (
+            occurred_at TIMESTAMP,
+            event_id    SYMBOL CAPACITY 4096 NOCACHE,
+            tenant_id   SYMBOL CAPACITY 256,
+            subject     SYMBOL CAPACITY 4096 NOCACHE,
+            role        SYMBOL CAPACITY 16,
+            source      SYMBOL CAPACITY 32,
+            action      SYMBOL CAPACITY 256,
+            resource_type SYMBOL CAPACITY 128,
+            resource_id   SYMBOL CAPACITY 4096 NOCACHE,
+            outcome     SYMBOL CAPACITY 8,
+            status_code INT,
+            remote_ip   SYMBOL CAPACITY 1024 NOCACHE,
+            request_id  SYMBOL CAPACITY 4096 NOCACHE,
+            meta_json   STRING,
+            chain_hash  STRING
+        ) TIMESTAMP(occurred_at) PARTITION BY DAY WAL;
+    `
 	_, err := q.pg.Exec(ctx, ddl)
 	return err
 }
@@ -151,10 +171,10 @@ func (q *QuestDB) flushLocked() error {
 // want SQL injection. Filter args are bound parameters.
 func (q *QuestDB) Query(ctx context.Context, filter Filter) ([]event.Event, error) {
 	const base = `SELECT
-		occurred_at, event_id, tenant_id, subject, role, source,
-		action, resource_type, resource_id, outcome, status_code,
-		remote_ip, request_id, meta_json, chain_hash
-	  FROM audit_events`
+        occurred_at, event_id, tenant_id, subject, role, source,
+        action, resource_type, resource_id, outcome, status_code,
+        remote_ip, request_id, meta_json, chain_hash
+      FROM audit_events`
 	conds := []string{}
 	args := []any{}
 	if filter.TenantID != "" {

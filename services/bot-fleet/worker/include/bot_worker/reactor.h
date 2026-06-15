@@ -55,8 +55,12 @@ public:
     // Update target RPS mid-flight (called from the controller bidi stream).
     auto set_rate(std::uint64_t rps) noexcept -> void;
 
-    // Counters — surfaced to Prometheus.
+    // Counters — surfaced to Prometheus / controller heartbeats.
     [[nodiscard]] auto orders_sent() const noexcept -> std::uint64_t;
+    // Completions observed via the transport ack callback. `acked` counts
+    // ACK/FILLED/PARTIAL outcomes; `errored` counts REJECT/TIMEOUT.
+    [[nodiscard]] auto orders_acked() const noexcept -> std::uint64_t;
+    [[nodiscard]] auto orders_errored() const noexcept -> std::uint64_t;
     [[nodiscard]] auto skew_ns() const noexcept -> std::int64_t;
 
 private:

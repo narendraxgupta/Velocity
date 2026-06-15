@@ -9,5 +9,7 @@ providers:
     updateIntervalSeconds: 10
     allowUiUpdates: true
     options:
+      # Must match the compose volume mount target for the dashboards dir
+      # (docker-compose.yml mounts them at /var/lib/grafana/dashboards).
       path: /var/lib/grafana/dashboards
       foldersFromFilesStructure: true

@@ -45,6 +45,8 @@ struct Reactor::Impl {
     Scheduler                     sched;
     std::vector<Persona>          bots;
     std::atomic<std::uint64_t>    orders_sent{0};
+    std::atomic<std::uint64_t>    orders_acked{0};
+    std::atomic<std::uint64_t>    orders_errored{0};
     std::atomic<std::uint64_t>    publish_drops{0};
     std::atomic<std::int64_t>     skew{0};
     std::atomic<bool>             stop{false};
@@ -104,6 +106,20 @@ struct Reactor::Impl {
         transport->set_ack_callback(
             [this](std::uint64_t cid, Outcome out, std::int64_t ack_ts,
                    std::int64_t fp, std::uint64_t fq) {
+                // Real per-order outcome accounting for controller heartbeats.
+                switch (out) {
+                    case Outcome::ACK:
+                    case Outcome::FILLED:
+                    case Outcome::PARTIAL:
+                        orders_acked.fetch_add(1, std::memory_order_relaxed);
+                        break;
+                    case Outcome::REJECT:
+                    case Outcome::TIMEOUT:
+                        orders_errored.fetch_add(1, std::memory_order_relaxed);
+                        break;
+                    default:
+                        break;  // UNKNOWN / CANCELLED: neither acked nor errored
+                }
                 Event ev{};
                 ev.submission_id  = submission_id_arr;
                 ev.correlation_id = cid;
@@ -128,9 +144,27 @@ struct Reactor::Impl {
 
         std::uint32_t bot_cursor = 0;
         std::uint32_t seq        = 0;
+        bool          was_paused = false;
 
         while (!stop.load(std::memory_order_acquire) &&
                !velocity::signals::shutdown_requested()) {
+
+            // 0. Paused (target RPS == 0): generate zero load. Keep draining
+            //    transport completions so in-flight acks still resolve, then
+            //    sleep briefly and re-check.
+            if (sched.paused()) {
+                was_paused = true;
+                transport->poll(16);
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                continue;
+            }
+            // Resuming from a pause: reset the intended-time cursor to now so
+            // we don't burst-send to "catch up" on intended timestamps that
+            // elapsed while paused.
+            if (was_paused) {
+                sched.resync(velocity::time::monotonic_ns());
+                was_paused = false;
+            }
 
             // 1. Next intended send time.
             const auto intended = sched.next();
@@ -240,6 +274,12 @@ auto Reactor::set_rate(std::uint64_t rps) noexcept -> void {
 
 auto Reactor::orders_sent() const noexcept -> std::uint64_t {
     return impl_->orders_sent.load(std::memory_order_relaxed);
+}
+auto Reactor::orders_acked() const noexcept -> std::uint64_t {
+    return impl_->orders_acked.load(std::memory_order_relaxed);
+}
+auto Reactor::orders_errored() const noexcept -> std::uint64_t {
+    return impl_->orders_errored.load(std::memory_order_relaxed);
 }
 auto Reactor::skew_ns() const noexcept -> std::int64_t {
     return impl_->skew.load(std::memory_order_relaxed);

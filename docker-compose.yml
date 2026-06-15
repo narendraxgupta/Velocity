@@ -183,8 +183,12 @@ services:
       - "yes"
       - --maxmemory
       - "512mb"
+      # noeviction (not allkeys-lru): the leaderboard Sorted Sets have no TTL,
+      # so an LRU policy could silently evict leaderboard:composite under memory
+      # pressure and make the board vanish. With noeviction, writes fail loudly
+      # instead of dropping scoring state.
       - --maxmemory-policy
-      - allkeys-lru
+      - noeviction
       - --tcp-backlog
       - "511"
       - --tcp-keepalive
@@ -289,7 +293,8 @@ services:
     container_name: velocity-grafana
     <<: [*restart, *logging, *velocity-labels]
     profiles: [debug, default]
-    networks: [obs]
+    # obs: reach prometheus; data: reach questdb:8812 for the Postgres datasource.
+    networks: [obs, data]
     ports:
       - "3001:3000"
     volumes:

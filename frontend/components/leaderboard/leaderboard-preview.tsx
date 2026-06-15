@@ -56,16 +56,17 @@ export function LeaderboardPreview() {
 
   return (
     <Panel>
-      <table className="w-full text-sm">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[640px] text-sm">
         <thead className="border-b border-border bg-surface-subtle">
           <tr className="text-left">
             <Th className="w-12 text-right">#</Th>
             <Th>Team / Submission</Th>
             <Th className="text-right">Composite</Th>
-            <Th className="text-right">Sustained</Th>
+            <Th className="hidden text-right lg:table-cell">Sustained</Th>
             <Th className="text-right">p99</Th>
-            <Th className="text-right">Correct</Th>
-            <Th className="w-24 text-right">Δ</Th>
+            <Th className="hidden text-right sm:table-cell">Correct</Th>
+            <Th className="hidden w-24 text-right md:table-cell">Δ</Th>
             <Th className="w-20 text-right">Status</Th>
           </tr>
         </thead>
@@ -87,13 +88,13 @@ export function LeaderboardPreview() {
                   {formatScore(row.composite)}
                 </span>
               </Td>
-              <Td className="text-right">
+              <Td className="hidden text-right lg:table-cell">
                 <span className="num text-signal-live">{formatRps(row.throughputRps)}</span>
                 <span className="ml-1 font-mono text-2xs text-muted-foreground">req/s</span>
               </Td>
               <Td className="text-right num">{formatLatencyNs(row.p99Ns)}</Td>
-              <Td className="text-right num">{row.correctness.toFixed(2)}%</Td>
-              <Td className="text-right">
+              <Td className="hidden text-right num sm:table-cell">{row.correctness.toFixed(2)}%</Td>
+              <Td className="hidden text-right md:table-cell">
                 <Delta value={row.delta} />
               </Td>
               <Td className="text-right">
@@ -110,6 +111,7 @@ export function LeaderboardPreview() {
           ))}
         </tbody>
       </table>
+      </div>
     </Panel>
   )
 }

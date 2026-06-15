@@ -367,6 +367,20 @@ struct Worker::Impl {
         return total;
     }
 
+    auto aggregate_orders_acked() const -> std::uint64_t {
+        std::lock_guard lk(state_mu);
+        std::uint64_t total = 0;
+        for (const auto& r : reactors) total += r->orders_acked();
+        return total;
+    }
+
+    auto aggregate_orders_errored() const -> std::uint64_t {
+        std::lock_guard lk(state_mu);
+        std::uint64_t total = 0;
+        for (const auto& r : reactors) total += r->orders_errored();
+        return total;
+    }
+
     [[nodiscard]] auto active_bot_count() const noexcept -> std::uint32_t {
         return active_bots_atomic.load(std::memory_order_acquire);
     }
@@ -429,12 +443,10 @@ auto Worker::run() -> void {
     // smoothed RPS computed from monotonic-clock deltas (realtime can
     // jump under NTP slew and break the rate estimate).
     //
-    // We do not yet have an end-to-end ack pipe from the transports back
-    // to the worker thread, so `acked_total` is intentionally left at the
-    // same value as `sent_total` for the bot-controller's display logic;
-    // the *real* per-order outcome lives in the telemetry stream that the
-    // ingester scores against. `errored_total` is also unset for the same
-    // reason. The controller already understands these are advisory.
+    // acked_total / errored_total are aggregated from the per-reactor transport
+    // ack callbacks (ACK/FILLED/PARTIAL count as acked; REJECT/TIMEOUT as
+    // errored), so the controller sees real outcome rates rather than a
+    // hard-coded 100% ack / 0 error placeholder.
     std::atomic<bool> hb_stop{false};
     std::atomic<bool> stream_alive{true};
     std::thread hb_thread([&]() {
@@ -446,6 +458,8 @@ auto Worker::run() -> void {
             const auto mono_ns = velocity::time::monotonic_ns();
             const auto wall_ns = velocity::time::realtime_ns();
             const auto sent    = impl_->aggregate_orders_sent();
+            const auto acked   = impl_->aggregate_orders_acked();
+            const auto errored = impl_->aggregate_orders_errored();
             const auto dt_ns   = last_mono_ns == 0 ? 0 : (mono_ns - last_mono_ns);
             const auto d_sent  = sent - last_sent;
             const auto rps     = dt_ns > 0
@@ -459,8 +473,8 @@ auto Worker::run() -> void {
             auto* status = msg.mutable_status();
             status->set_worker_id(impl_->cfg.worker_id);
             status->set_sent_total(sent);
-            status->set_acked_total(sent);
-            status->set_errored_total(0);
+            status->set_acked_total(acked);
+            status->set_errored_total(errored);
             status->set_current_rps(rps);
             status->set_active_bots(impl_->active_bot_count());
             status->set_sent_ts_ns(static_cast<std::uint64_t>(wall_ns));

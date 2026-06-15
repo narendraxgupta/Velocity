@@ -97,8 +97,41 @@ type WireMessage =
 
 export type ConnectionState = 'connecting' | 'open' | 'closed' | 'error'
 
-const DEFAULT_URL =
-  process.env.NEXT_PUBLIC_LEADERBOARD_WS ?? 'ws://localhost:8090/v1/leaderboard'
+// Resolve the leaderboard WebSocket URL at RUNTIME (in the browser) rather
+// than baking a host into the bundle at build time.
+//
+//  1. An explicit, non-empty NEXT_PUBLIC_LEADERBOARD_WS always wins.
+//  2. Otherwise derive from the page's own location so the same image works
+//     locally AND behind the GitHub Codespaces tunnel, where each forwarded
+//     container port lives on its own subdomain "<name>-<port>.app.github.dev".
+//     We swap the frontend's port segment (3000) for the leaderboard-ws port.
+//  3. SSR fallback (no window) — only used if a client never hydrates.
+const LEADERBOARD_WS_PORT = '8090'
+const LEADERBOARD_WS_PATH = '/v1/leaderboard'
+
+function resolveLeaderboardWsUrl(): string {
+  const explicit = process.env.NEXT_PUBLIC_LEADERBOARD_WS
+  if (explicit && explicit.length > 0) return explicit
+
+  if (typeof window === 'undefined') {
+    return `ws://localhost:${LEADERBOARD_WS_PORT}${LEADERBOARD_WS_PATH}`
+  }
+
+  const { protocol, hostname } = window.location
+  const wsProto = protocol === 'https:' ? 'wss:' : 'ws:'
+
+  // GitHub Codespaces / preview domains: "<name>-<port>.<domain>".
+  const codespace = hostname.match(
+    /^(.*)-(\d+)\.(app\.github\.dev|githubpreview\.dev)$/,
+  )
+  if (codespace) {
+    const [, prefix, , domain] = codespace
+    return `${wsProto}//${prefix}-${LEADERBOARD_WS_PORT}.${domain}${LEADERBOARD_WS_PATH}`
+  }
+
+  // Local dev / direct host: same hostname, leaderboard-ws port.
+  return `${wsProto}//${hostname}:${LEADERBOARD_WS_PORT}${LEADERBOARD_WS_PATH}`
+}
 
 export function useLeaderboardStream(stream: string = 'global') {
   const [rows, setRows] = useState<LeaderRow[]>([])
@@ -192,7 +225,7 @@ export function useLeaderboardStream(stream: string = 'global') {
       setState('connecting')
       let ws: WebSocket
       try {
-        ws = new WebSocket(DEFAULT_URL)
+        ws = new WebSocket(resolveLeaderboardWsUrl())
       } catch {
         // Malformed URL or blocked — fall back to REST polling cadence.
         setState('error')

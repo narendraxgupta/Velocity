@@ -250,6 +250,21 @@ func (h *SubmissionHandlers) Register(_ context.Context, req *pb.RegisterRequest
 		id = ulid.Make().String()
 	}
 
+	h.mu.Lock()
+	// Register is idempotent on the artefact-derived id. If we've already seen
+	// this submission, return it WITHOUT resetting its lifecycle state — a naive
+	// overwrite would drop the phase/imageRef/endpoint/podName of an already
+	// built or deployed submission and orphan its running sandbox.
+	if existing, ok := h.submissions[id]; ok {
+		phase := existing.phase
+		h.mu.Unlock()
+		h.logger.Infow("submission re-registered (idempotent)",
+			"id", id, "phase", phase)
+		return &pb.RegisterResponse{
+			SubmissionId: &commonv1.SubmissionId{Value: id},
+		}, nil
+	}
+
 	rec := &submissionRecord{
 		id:          id,
 		displayName: req.GetDisplayName(),
@@ -260,8 +275,6 @@ func (h *SubmissionHandlers) Register(_ context.Context, req *pb.RegisterRequest
 		phase:       pb.SubmissionPhase_SUBMISSION_PHASE_REGISTERED,
 		createdAt:   time.Now(),
 	}
-
-	h.mu.Lock()
 	h.submissions[id] = rec
 	h.mu.Unlock()
 	h.broadcast(id, pb.SubmissionPhase_SUBMISSION_PHASE_REGISTERED, "registered")

@@ -421,7 +421,16 @@ auto run(ValidatorConfig cfg) -> void {
                         .id       = cid,
                         .price    = static_cast<std::int64_t>(event.price().units()),
                         .quantity = static_cast<std::uint64_t>(event.quantity().units()),
-                        .ts_ns    = static_cast<std::int64_t>(event.sent_ts_ns()),
+                        // sent_ts_ns is the worker's CLOCK_MONOTONIC_RAW value.
+                        // Convert to wall-clock so order/fill times share the
+                        // same clock domain as exec_quality.tick(), eviction,
+                        // and snapshots (all realtime_ns()). Mixing the two made
+                        // settle/reversion windows compare monotonic order times
+                        // against realtime "now", corrupting slippage/IS stats.
+                        // The transform is monotonic, so reference-book time
+                        // priority ordering is preserved.
+                        .ts_ns    = velocity::time::monotonic_to_wallclock_ns(
+                                        static_cast<std::int64_t>(event.sent_ts_ns())),
                         .side     = map_side(event.side()),
                         .type     = map_type(event.order_type()),
                         .tif      = map_tif(event.order_type()),

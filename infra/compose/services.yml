@@ -78,7 +78,7 @@ services:
       VELOCITY_MINIO_ACCESS_KEY: velocity
       VELOCITY_MINIO_SECRET_KEY: velocity-dev-secret
       VELOCITY_REDIS_ADDR: redis://redis:6379
-      VELOCITY_OTLP_ENDPOINT: jaeger:4317
+      VELOCITY_OTLP_ENDPOINT: http://jaeger:4318
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -148,7 +148,7 @@ services:
       VELOCITY_QUESTDB_HOST: questdb
       VELOCITY_QUESTDB_ILP_PORT: 9009
       VELOCITY_REDIS_ADDR: tcp://redis:6379
-      VELOCITY_OTLP_ENDPOINT: jaeger:4317
+      VELOCITY_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       redpanda: { condition: service_healthy }
       questdb:  { condition: service_healthy }
@@ -167,7 +167,7 @@ services:
       VELOCITY_REDPANDA_BROKERS: redpanda:29092
       VELOCITY_QUESTDB_HOST: questdb
       VELOCITY_QUESTDB_ILP_PORT: 9009
-      VELOCITY_OTLP_ENDPOINT: jaeger:4317
+      VELOCITY_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       redpanda: { condition: service_healthy }
       questdb:  { condition: service_healthy }
@@ -189,7 +189,7 @@ services:
       VELOCITY_LEADERBOARD_CHANNEL: leaderboard.global
       VELOCITY_LEADERBOARD_ZSET: leaderboard:composite
       VELOCITY_GROUP_ID: velocity-scoring
-      VELOCITY_OTLP_ENDPOINT: jaeger:4317
+      VELOCITY_OTLP_ENDPOINT: http://jaeger:4318
       # Single-box / Codespace tuning. The default scoring thresholds assume a
       # kernel-bypass cluster: 50k rps sustained and a 30us p99. Over HTTP on a
       # shared-CPU box the engine tops out ~1.5k rps with low-ms p99, so those
@@ -216,7 +216,7 @@ services:
     environment:
       VELOCITY_WS_PORT: 8090
       VELOCITY_REDIS_ADDR: tcp://redis:6379
-      VELOCITY_OTLP_ENDPOINT: jaeger:4317
+      VELOCITY_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       redis: { condition: service_healthy }
 
@@ -232,7 +232,11 @@ services:
   ollama:
     image: ollama/ollama:0.4.4
     container_name: velocity-ollama
-    profiles: [apps, llm]
+    # `llm` only (NOT `apps`): the heavyweight model (~5GB) downloads on first
+    # start, so it must be opted into explicitly with `--profile llm`. The
+    # normal `make up-apps` stack runs without it; the critique panel just
+    # returns a graceful 503 until you bring the llm profile up.
+    profiles: [llm]
     networks: [apps]
     ports:
       - "11434:11434"
@@ -254,7 +258,7 @@ services:
   ollama-init:
     image: ollama/ollama:0.4.4
     container_name: velocity-ollama-init
-    profiles: [apps, llm]
+    profiles: [llm]
     networks: [apps]
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -276,7 +280,7 @@ services:
       context: ../../services/critique-service
       dockerfile: Dockerfile
     container_name: velocity-critique-service
-    profiles: [apps, llm]
+    profiles: [llm]
     networks: [apps, data]
     ports:
       - "8094:8094"
@@ -353,6 +357,11 @@ services:
       REDIS_ADDR:      redis:6379
       QUESTDB_HOST:    questdb
       QUESTDB_ILP_PORT: "9009"
+      # PG-wire read path: must match questdb-server.conf (pg.user/pg.password).
+      # QuestDB here is hardened off the stock admin:quest defaults.
+      QUESTDB_PG_PORT:     "8812"
+      QUESTDB_PG_USER:     velocity
+      QUESTDB_PG_PASSWORD: velocity-dev
       KAFKA_BROKERS:   redpanda:29092
       KAFKA_GROUP:     audit-log
       HTTP_PORT:       "8081"
@@ -382,7 +391,10 @@ services:
       #   export FRONTEND_WS_URL=wss://<name>-8090.app.github.dev/v1/leaderboard
       args:
         NEXT_PUBLIC_API_GATEWAY_URL: ${FRONTEND_API_URL:-}
-        NEXT_PUBLIC_LEADERBOARD_WS: ${FRONTEND_WS_URL:-ws://localhost:8090/v1/leaderboard}
+        # Empty default → the browser derives the WS URL from its own location
+        # at runtime (works for localhost and the Codespaces tunnel). Override
+        # with FRONTEND_WS_URL only to force a specific endpoint.
+        NEXT_PUBLIC_LEADERBOARD_WS: ${FRONTEND_WS_URL:-}
         API_GATEWAY_ORIGIN: ${API_GATEWAY_ORIGIN:-http://api-gateway:8080}
     container_name: velocity-frontend
     profiles: [apps]
@@ -396,7 +408,7 @@ services:
       # Kept for parity; the values that reach the browser are the build args
       # above (NEXT_PUBLIC_* are inlined at build time).
       NEXT_PUBLIC_API_GATEWAY_URL: ${FRONTEND_API_URL:-}
-      NEXT_PUBLIC_LEADERBOARD_WS: ${FRONTEND_WS_URL:-ws://localhost:8090/v1/leaderboard}
+      NEXT_PUBLIC_LEADERBOARD_WS: ${FRONTEND_WS_URL:-}
     depends_on:
       - api-gateway
       - leaderboard-ws

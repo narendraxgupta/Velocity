@@ -24,8 +24,10 @@ export const revalidate = 3600
 // localhost:8080.
 const API_BASE =
   process.env.INTERNAL_API_GATEWAY_URL ??
+  process.env.API_GATEWAY_ORIGIN ??
   process.env.NEXT_PUBLIC_API_GATEWAY_URL ??
-  'http://localhost:8080'
+  // In a container the gateway is reachable by service name, not localhost.
+  'http://api-gateway:8080'
 
 type SharePayload = {
   team: string

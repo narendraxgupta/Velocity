@@ -578,24 +578,10 @@ struct BenchmarkServiceImpl::Impl {
         }
         s->cancel_requested.store(true);
 
-        // Stop load by sending a zero-rate RampUpdate to every worker. We
-        // *don't* send a process-level Shutdown — that would terminate
-        // the entire bot fleet, including workers that may go on to serve
-        // future benchmarks. The worker treats from_elapsed_ms=0 as
-        // "replace all remaining waypoints", so this is a graceful stop.
-        for (auto& ws : registry->all()) {
-            velocity::bot::v1::ControllerToWorker msg;
-            auto* ramp = msg.mutable_ramp();
-            ramp->set_from_elapsed_ms(0);
-            auto* wp = ramp->add_waypoints();
-            wp->set_elapsed_ms(0);
-            wp->set_target_rps(0);
-            std::lock_guard lk(ws->write_mu);
-            if (!ws->stream->Write(msg)) {
-                VLOG_WARN("cancel {}: write to worker {} failed",
-                          s->benchmark_id, ws->worker_id);
-            }
-        }
+        // Stop worker load immediately; finalize() also broadcasts a stop, but
+        // doing it here makes cancellation take effect without waiting on the
+        // finalize path. Both are idempotent (zero-rate ramp).
+        broadcast_stop_load(s->benchmark_id);
 
         finalize(*s, BenchmarkPhase::BENCHMARK_PHASE_CANCELLED);
         resp->set_cancelled(true);
@@ -994,7 +980,33 @@ struct BenchmarkServiceImpl::Impl {
         s.snap_cv.notify_all();
     }
 
+    // Broadcast a zero-rate RampUpdate to every worker so they stop generating
+    // load. The worker treats from_elapsed_ms=0 as "replace all remaining
+    // waypoints", and a target_rps of 0 pauses its scheduler (zero load, not a
+    // 1 Hz trickle). We deliberately do NOT send a process-level Shutdown:
+    // workers must survive to serve future benchmarks.
+    auto broadcast_stop_load(const std::string& benchmark_id) -> void {
+        for (auto& ws : registry->all()) {
+            velocity::bot::v1::ControllerToWorker msg;
+            auto* ramp = msg.mutable_ramp();
+            ramp->set_from_elapsed_ms(0);
+            auto* wp = ramp->add_waypoints();
+            wp->set_elapsed_ms(0);
+            wp->set_target_rps(0);
+            std::lock_guard lk(ws->write_mu);
+            if (!ws->stream->Write(msg)) {
+                VLOG_WARN("stop-load {}: write to worker {} failed",
+                          benchmark_id, ws->worker_id);
+            }
+        }
+    }
+
     auto finalize(BenchmarkSession& s, BenchmarkPhase final_phase) -> void {
+        // Stop worker load on EVERY terminal transition (COMPLETE included).
+        // Previously only cancel() did this, so a benchmark that ran to its
+        // natural end left workers generating hold-phase load indefinitely.
+        broadcast_stop_load(s.benchmark_id);
+
         s.phase.store(final_phase);
         s.finished_at_ns = velocity::time::realtime_ns();
         {
@@ -1102,6 +1114,21 @@ auto BenchmarkServiceImpl::stop() -> void {
         out.set_duration_seconds(35);
         out.set_ramp_seconds(5);
         out.set_hold_seconds(30);
+        out.set_per_order_timeout_us(250'000);
+        add_persona(BP::BOT_PERSONA_MARKET_MAKER, 60);
+        add_persona(BP::BOT_PERSONA_AGGRESSIVE,   20);
+        add_persona(BP::BOT_PERSONA_CANCELLER,    10);
+        add_persona(BP::BOT_PERSONA_NOISE,        10);
+        return true;
+    }
+    if (name == "soak") {
+        // Long, steady moderate load — surfaces slow leaks / GC creep /
+        // fragmentation that short runs miss. The anomaly-detector suggests
+        // this profile when a run looks healthy but unproven over time.
+        out.set_target_rps(60'000);
+        out.set_duration_seconds(300);
+        out.set_ramp_seconds(10);
+        out.set_hold_seconds(290);
         out.set_per_order_timeout_us(250'000);
         add_persona(BP::BOT_PERSONA_MARKET_MAKER, 60);
         add_persona(BP::BOT_PERSONA_AGGRESSIVE,   20);
