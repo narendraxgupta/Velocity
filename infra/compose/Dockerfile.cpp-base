@@ -77,5 +77,5 @@ RUN conan install . --build=missing \
         -s build_type=Release \
         -s compiler.cppstd=20 \
         -s compiler.libcxx=libstdc++11 \
- && cmake --preset conan-release \
+ && cmake --preset conan-release -DVELOCITY_USE_LTO=OFF \
  && cmake --build --preset conan-release --parallel
